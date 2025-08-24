@@ -143,11 +143,36 @@ else
         
         # Try different reinit methods
         if command -v postgresql-setup &> /dev/null; then
+            echo "Using postgresql-setup..."
             sudo postgresql-setup --initdb &> /dev/null
         elif command -v pg_ctlcluster &> /dev/null; then
-            sudo -u postgres initdb -D /var/lib/postgresql/15/main &> /dev/null || \
-            sudo -u postgres initdb -D /var/lib/postgresql/14/main &> /dev/null || \
-            sudo -u postgres initdb -D /var/lib/postgresql/13/main &> /dev/null
+            echo "Using pg_ctlcluster..."
+            # Find existing clusters
+            CLUSTERS=$(pg_lsclusters | grep -v "Ver" | awk '{print $1 " " $2}' | head -1 2>/dev/null)
+            if [ -n "$CLUSTERS" ]; then
+                read PG_VERSION PG_CLUSTER <<< "$CLUSTERS"
+                echo "Found cluster: $PG_VERSION $PG_CLUSTER"
+                sudo -u postgres initdb -D "/var/lib/postgresql/$PG_VERSION/$PG_CLUSTER" &> /dev/null
+            else
+                echo "No clusters found, trying default locations..."
+                for version in 15 14 13 12; do
+                    if [ -d "/var/lib/postgresql/$version" ]; then
+                        echo "Found data directory: /var/lib/postgresql/$version"
+                        sudo -u postgres initdb -D "/var/lib/postgresql/$version/main" &> /dev/null
+                        break
+                    fi
+                done
+            fi
+        else
+            echo "Trying alternative reinit method..."
+            # Try system data directories
+            for version in 15 14 13 12; do
+                if [ -d "/var/lib/postgresql/$version" ]; then
+                    echo "Found system data directory: /var/lib/postgresql/$version"
+                    sudo -u postgres initdb -D "/var/lib/postgresql/$version/main" &> /dev/null
+                    break
+                fi
+            done
         fi
     fi
     

@@ -49,24 +49,65 @@ echo
 
 # Step 4: Reinitialize PostgreSQL
 echo "🔄 Reinitializing PostgreSQL database..."
+
+# Find PostgreSQL version and data directory
+PG_VERSION=""
+PG_DATA_DIR=""
+
+# Try to find PostgreSQL version
+if command -v postgres &> /dev/null; then
+    PG_VERSION=$(postgres --version | grep -oE '[0-9]+' | head -1)
+    echo "Found PostgreSQL version: $PG_VERSION"
+fi
+
+# Try different reinit methods
 if command -v postgresql-setup &> /dev/null; then
+    echo "Using postgresql-setup..."
     postgresql-setup --initdb
 elif command -v pg_ctlcluster &> /dev/null; then
-    pg_ctlcluster 15 main start || pg_ctlcluster 14 main start || pg_ctlcluster 13 main start
-    pg_ctlcluster 15 main stop || pg_ctlcluster 14 main stop || pg_ctlcluster 13 main stop
-    pg_ctlcluster 15 main start || pg_ctlcluster 14 main start || pg_ctlcluster 13 main start
+    echo "Using pg_ctlcluster..."
+    # Find existing clusters
+    CLUSTERS=$(pg_lsclusters | grep -v "Ver" | awk '{print $1 " " $2}' | head -1)
+    if [ -n "$CLUSTERS" ]; then
+        read PG_VERSION PG_CLUSTER <<< "$CLUSTERS"
+        echo "Found cluster: $PG_VERSION $PG_CLUSTER"
+        sudo -u postgres initdb -D "/var/lib/postgresql/$PG_VERSION/$PG_CLUSTER"
+    else
+        echo "No clusters found, trying default locations..."
+        for version in 15 14 13 12; do
+            if [ -d "/var/lib/postgresql/$version" ]; then
+                echo "Found data directory: /var/lib/postgresql/$version"
+                sudo -u postgres initdb -D "/var/lib/postgresql/$version/main"
+                break
+            fi
+        done
+    fi
 else
     echo "❌ Cannot find PostgreSQL setup tools"
     echo "Trying alternative method..."
     
-    # Try to find postgres user home
+    # Try to find postgres user home and data directories
     POSTGRES_HOME=$(getent passwd postgres | cut -d: -f6)
     if [ -n "$POSTGRES_HOME" ]; then
         echo "Found postgres home: $POSTGRES_HOME"
-        sudo -u postgres initdb -D "$POSTGRES_HOME/15/main" 2>/dev/null || \
-        sudo -u postgres initdb -D "$POSTGRES_HOME/14/main" 2>/dev/null || \
-        sudo -u postgres initdb -D "$POSTGRES_HOME/13/main" 2>/dev/null
+        # Look for data directories
+        for dir in "$POSTGRES_HOME"/*/main; do
+            if [ -d "$dir" ]; then
+                echo "Found data directory: $dir"
+                sudo -u postgres initdb -D "$dir"
+                break
+            fi
+        done
     fi
+    
+    # Try system data directories
+    for version in 15 14 13 12; do
+        if [ -d "/var/lib/postgresql/$version" ]; then
+            echo "Found system data directory: /var/lib/postgresql/$version"
+            sudo -u postgres initdb -D "/var/lib/postgresql/$version/main"
+            break
+        fi
+    done
 fi
 echo
 
