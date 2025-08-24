@@ -1,0 +1,126 @@
+// Global styles for MuliC2 - Simple Old-School Terminal Theme
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --primary-black: #000000;
+  --secondary-black: #0a0a0a;
+  --dark-gray: #1a1a1a;
+  --medium-gray: #2a2a2a;
+  --light-gray: #3a3a3a;
+  --accent-red: #ff0000;
+  --dark-red: #8b0000;
+  --text-white: #ffffff;
+  --text-gray: #cccccc;
+  --text-dark: #888888;
+  --border-color: #333333;
+}
+
+body {
+  font-family: 'Courier New', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--primary-black);
+  color: var(--text-white);
+  overflow-x: hidden;
+}
+
+#app {
+  min-height: 100vh;
+  background-color: var(--primary-black);
+}
+
+// Simple scrollbar
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--dark-gray);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-red);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--dark-red);
+}
+
+// Utility classes
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.mt-20 {
+  margin-top: 20px;
+}
+
+.mb-20 {
+  margin-bottom: 20px;
+}
+
+.p-20 {
+  padding: 20px;
+}
+
+// Simple Element Plus overrides
+.el-button--primary {
+  background-color: var(--accent-red) !important;
+  border-color: var(--accent-red) !important;
+  
+  &:hover {
+    background-color: var(--dark-red) !important;
+    border-color: var(--dark-red) !important;
+  }
+}
+
+.el-input__wrapper {
+  background-color: var(--dark-gray) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-white) !important;
+}
+
+.el-input__inner {
+  color: var(--text-white) !important;
+  
+  &::placeholder {
+    color: var(--text-dark) !important;
+  }
+}
+
+.el-form-item__label {
+  color: var(--text-gray) !important;
+}
+
+.el-checkbox__label {
+  color: var(--text-gray) !important;
+}
+
+.el-menu {
+  background-color: var(--secondary-black) !important;
+  border-color: var(--border-color) !important;
+}
+
+.el-menu-item {
+  color: var(--text-gray) !important;
+  
+  &:hover {
+    background-color: var(--medium-gray) !important;
+  }
+  
+  &.is-active {
+    background-color: var(--accent-red) !important;
+    color: var(--text-white) !important;
+  }
+}

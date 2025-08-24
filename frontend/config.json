@@ -1,0 +1,9 @@
+{
+  "backend": {
+    "api_port": 8080,
+    "c2_default_port": 8443
+  },
+  "frontend": {
+    "port": 5173
+  }
+}
