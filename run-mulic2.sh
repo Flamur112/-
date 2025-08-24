@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# Check if user wants help
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "🚀 MuliC2 Linux Launcher"
+    echo
+    echo "Usage:"
+    echo "  ./run-mulic2.sh          # Auto-fix everything and start MuliC2"
+    echo "  ./run-mulic2.sh --help   # Show this help"
+    echo
+    echo "The script will automatically:"
+    echo "  ✅ Start PostgreSQL automatically"
+    echo "  ✅ Fix user permissions"
+    echo "  ✅ Create database if needed"
+    echo "  ✅ Start MuliC2 immediately"
+    echo
+    exit 0
+fi
+
+echo "🚀 Auto-fixing everything and starting MuliC2..."
+echo "💡 This will automatically fix PostgreSQL issues"
+echo
+
 echo "========================================"
 echo "           MuliC2 Launcher"
 echo "========================================"
@@ -91,40 +112,59 @@ if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
     fi
 fi
 
-# Check if database exists and create if needed
-echo "🔍 Checking database connection..."
-echo "💡 Note: On Linux, you may need to set a password for postgres user"
-echo "💡 Run: sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'your_password';\""
+# Auto-fix PostgreSQL issues
+echo "🔧 Auto-fixing PostgreSQL setup..."
 
-# Try different connection methods
-DB_CREATED=false
+# Start PostgreSQL if not running
+if ! systemctl is-active --quiet postgresql; then
+    echo "🚀 Starting PostgreSQL service..."
+    sudo systemctl start postgresql
+    sleep 2
+fi
+
+# Fix user permissions
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
+sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
+
+# Try connection
 if psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
-    echo "✅ PostgreSQL connection successful (no password)"
-    DB_CREATED=true
-elif psql -U postgres -d postgres -h localhost -c "SELECT 1;" &> /dev/null; then
-    echo "✅ PostgreSQL connection successful (localhost)"
-    DB_CREATED=true
-elif sudo -u postgres psql -d postgres -c "SELECT 1;" &> /dev/null; then
-    echo "✅ PostgreSQL connection successful (sudo postgres)"
-    DB_CREATED=true
+    echo "✅ PostgreSQL connection successful"
 else
-    echo "❌ Cannot connect to PostgreSQL"
-    echo "Trying to fix PostgreSQL setup..."
+    echo "❌ PostgreSQL connection failed"
+    echo "🔧 Auto-fixing collation issues..."
     
-    # Try to create postgres user with password
-    echo "🔧 Setting up PostgreSQL user..."
+    # Stop PostgreSQL
+    sudo systemctl stop postgresql &> /dev/null
+    
+    # Try to reinitialize if data directory exists
+    if [ -d "/var/lib/postgresql" ] && [ "$(ls -A /var/lib/postgresql)" ]; then
+        echo "🔄 Reinitializing PostgreSQL to fix collation..."
+        sudo rm -rf /var/lib/postgresql/* &> /dev/null
+        
+        # Try different reinit methods
+        if command -v postgresql-setup &> /dev/null; then
+            sudo postgresql-setup --initdb &> /dev/null
+        elif command -v pg_ctlcluster &> /dev/null; then
+            sudo -u postgres initdb -D /var/lib/postgresql/15/main &> /dev/null || \
+            sudo -u postgres initdb -D /var/lib/postgresql/14/main &> /dev/null || \
+            sudo -u postgres initdb -D /var/lib/postgresql/13/main &> /dev/null
+        fi
+    fi
+    
+    # Start PostgreSQL
+    sudo systemctl start postgresql
+    sleep 3
+    
+    # Setup user again
     sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
     sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
     
-    # Try connection again
-    if psql -U postgres -d postgres -h localhost -c "SELECT 1;" &> /dev/null; then
-        echo "✅ PostgreSQL connection successful (after setup)"
-        DB_CREATED=true
+    # Test connection
+    if psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
+        echo "✅ PostgreSQL fixed and connection successful"
     else
-        echo "❌ Still cannot connect to PostgreSQL"
-        echo "Please run these commands manually:"
-        echo "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'postgres';\""
-        echo "sudo -u postgres psql -c \"ALTER USER postgres CREATEDB;\""
+        echo "❌ PostgreSQL still not working"
+        echo "💡 Please run: sudo ./fix-postgres-collation.sh"
         echo
         echo "Press Enter to exit..."
         read
@@ -134,31 +174,23 @@ fi
 
 echo
 
-# Check if mulic2_db exists
-echo "🔍 Checking if database 'mulic2_db' exists..."
+# Auto-create database if needed
+echo "🗄️  Checking database 'mulic2_db'..."
 if ! psql -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname='mulic2_db';" | grep -q "1" 2>/dev/null; then
-    echo "📋 Database 'mulic2_db' not found. Creating it now..."
+    echo "📋 Creating database 'mulic2_db'..."
     
-    # Try different creation methods
-    if psql -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
+    # Try to create database
+    if sudo -u postgres createdb mulic2_db &> /dev/null; then
         echo "✅ Database 'mulic2_db' created successfully"
-    elif sudo -u postgres psql -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
-        echo "✅ Database 'mulic2_db' created successfully (sudo)"
+    elif psql -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
+        echo "✅ Database 'mulic2_db' created successfully (SQL method)"
     else
         echo "❌ Failed to create database"
-        echo "Trying alternative method..."
-        
-        # Create database as postgres user
-        if sudo -u postgres createdb mulic2_db; then
-            echo "✅ Database 'mulic2_db' created successfully (createdb)"
-        else
-            echo "❌ All database creation methods failed"
-            echo "Please check your PostgreSQL setup"
-            echo
-            echo "Press Enter to exit..."
-            read
-            exit 1
-        fi
+        echo "💡 Please run: sudo ./fix-postgres-collation.sh"
+        echo
+        echo "Press Enter to exit..."
+        read
+        exit 1
     fi
 else
     echo "✅ Database 'mulic2_db' already exists"
