@@ -75,33 +75,91 @@ fi
 echo "✅ PostgreSQL is running"
 echo
 
-# Check if database exists and create if needed
-echo "🔍 Checking database connection..."
-if ! psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
-    echo "❌ Cannot connect to PostgreSQL"
-    echo "Please check your PostgreSQL password and try again"
-    echo
-    echo "Press Enter to exit..."
-    read
-    exit 1
+# Fix common PostgreSQL configuration issues on Linux
+echo "🔧 Checking PostgreSQL configuration..."
+if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
+    echo "💡 PostgreSQL configuration found, checking authentication..."
+    
+    # Check if local connections are allowed
+    if ! grep -q "local.*all.*all.*trust" /etc/postgresql/*/main/pg_hba.conf 2>/dev/null; then
+        echo "⚠️  PostgreSQL may need authentication configuration"
+        echo "💡 If you get connection errors, run:"
+        echo "   sudo nano /etc/postgresql/*/main/pg_hba.conf"
+        echo "   Change 'local all all peer' to 'local all all trust'"
+        echo "   Then restart PostgreSQL: sudo systemctl restart postgresql"
+        echo
+    fi
 fi
 
-echo "✅ PostgreSQL connection successful"
-echo
+# Check if database exists and create if needed
+echo "🔍 Checking database connection..."
+echo "💡 Note: On Linux, you may need to set a password for postgres user"
+echo "💡 Run: sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'your_password';\""
 
-# Check if mulic2_db exists
-echo "🔍 Checking if database 'mulic2_db' exists..."
-if ! psql -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname='mulic2_db';" | grep -q "1"; then
-    echo "📋 Database 'mulic2_db' not found. Creating it now..."
-    if ! psql -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
-        echo "❌ Failed to create database"
-        echo "Please check your PostgreSQL permissions"
+# Try different connection methods
+DB_CREATED=false
+if psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
+    echo "✅ PostgreSQL connection successful (no password)"
+    DB_CREATED=true
+elif psql -U postgres -d postgres -h localhost -c "SELECT 1;" &> /dev/null; then
+    echo "✅ PostgreSQL connection successful (localhost)"
+    DB_CREATED=true
+elif sudo -u postgres psql -d postgres -c "SELECT 1;" &> /dev/null; then
+    echo "✅ PostgreSQL connection successful (sudo postgres)"
+    DB_CREATED=true
+else
+    echo "❌ Cannot connect to PostgreSQL"
+    echo "Trying to fix PostgreSQL setup..."
+    
+    # Try to create postgres user with password
+    echo "🔧 Setting up PostgreSQL user..."
+    sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
+    sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
+    
+    # Try connection again
+    if psql -U postgres -d postgres -h localhost -c "SELECT 1;" &> /dev/null; then
+        echo "✅ PostgreSQL connection successful (after setup)"
+        DB_CREATED=true
+    else
+        echo "❌ Still cannot connect to PostgreSQL"
+        echo "Please run these commands manually:"
+        echo "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'postgres';\""
+        echo "sudo -u postgres psql -c \"ALTER USER postgres CREATEDB;\""
         echo
         echo "Press Enter to exit..."
         read
         exit 1
     fi
-    echo "✅ Database 'mulic2_db' created successfully"
+fi
+
+echo
+
+# Check if mulic2_db exists
+echo "🔍 Checking if database 'mulic2_db' exists..."
+if ! psql -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname='mulic2_db';" | grep -q "1" 2>/dev/null; then
+    echo "📋 Database 'mulic2_db' not found. Creating it now..."
+    
+    # Try different creation methods
+    if psql -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
+        echo "✅ Database 'mulic2_db' created successfully"
+    elif sudo -u postgres psql -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
+        echo "✅ Database 'mulic2_db' created successfully (sudo)"
+    else
+        echo "❌ Failed to create database"
+        echo "Trying alternative method..."
+        
+        # Create database as postgres user
+        if sudo -u postgres createdb mulic2_db; then
+            echo "✅ Database 'mulic2_db' created successfully (createdb)"
+        else
+            echo "❌ All database creation methods failed"
+            echo "Please check your PostgreSQL setup"
+            echo
+            echo "Press Enter to exit..."
+            read
+            exit 1
+        fi
+    fi
 else
     echo "✅ Database 'mulic2_db' already exists"
 fi
