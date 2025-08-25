@@ -96,6 +96,22 @@ fi
 echo "✅ PostgreSQL is running"
 echo
 
+# Detect Debian/Kali cluster and port (if available)
+CLUSTER_VERSION=""
+CLUSTER_NAME=""
+CLUSTER_PORT=""
+PSQL_FLAGS=""
+if command -v pg_lsclusters &> /dev/null; then
+    CI=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
+    if [ -n "$CI" ]; then
+        # Expected columns: Ver Cluster Port Status Owner Data directory Log file
+        read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CI"
+        if [ -n "$CLUSTER_PORT" ]; then
+            PSQL_FLAGS="-p $CLUSTER_PORT"
+        fi
+    fi
+fi
+
 # Fix common PostgreSQL configuration issues on Linux
 echo "🔧 Checking PostgreSQL configuration..."
 if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
@@ -122,12 +138,18 @@ if ! systemctl is-active --quiet postgresql; then
     sleep 2
 fi
 
+# Ensure specific Debian/Kali cluster is started when detected
+if [ -n "$CLUSTER_VERSION" ] && [ -n "$CLUSTER_NAME" ] && command -v pg_ctlcluster &> /dev/null; then
+    sudo pg_ctlcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" start || true
+    sleep 2
+fi
+
 # Fix user permissions
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
 sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
 
-# Try connection
-if psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
+# Try connection (use detected port if present)
+if psql $PSQL_FLAGS -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
     echo "✅ PostgreSQL connection successful"
 else
     echo "❌ PostgreSQL connection failed"
@@ -143,8 +165,10 @@ else
         # Find existing cluster
         CLUSTER_INFO=$(pg_lsclusters 2>/dev/null | grep -v "Ver" | head -1)
         if [ -n "$CLUSTER_INFO" ]; then
-            read CLUSTER_VERSION CLUSTER_NAME <<< "$CLUSTER_INFO"
-            echo "Found cluster: $CLUSTER_VERSION $CLUSTER_NAME"
+            # Re-detect with port
+            read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CLUSTER_INFO"
+            echo "Found cluster: $CLUSTER_VERSION $CLUSTER_NAME ${CLUSTER_PORT:-}"
+            if [ -n "$CLUSTER_PORT" ]; then PSQL_FLAGS="-p $CLUSTER_PORT"; fi
             
             # Stop PostgreSQL first
             sudo systemctl stop postgresql &> /dev/null
@@ -155,6 +179,14 @@ else
                 sudo pg_dropcluster $CLUSTER_VERSION $CLUSTER_NAME &> /dev/null
                 sudo pg_createcluster $CLUSTER_VERSION $CLUSTER_NAME &> /dev/null
                 echo "✅ Cluster recreated successfully"
+                # Start the recreated cluster and refresh port info
+                sudo pg_ctlcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" start || true
+                sleep 2
+                CI2=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
+                if [ -n "$CI2" ]; then
+                    read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CI2"
+                    if [ -n "$CLUSTER_PORT" ]; then PSQL_FLAGS="-p $CLUSTER_PORT"; fi
+                fi
             else
                 echo "pg_dropcluster/pg_createcluster not found, trying alternative..."
                 sudo rm -rf /var/lib/postgresql/* &> /dev/null
@@ -192,13 +224,19 @@ else
     # Start PostgreSQL
     sudo systemctl start postgresql
     sleep 3
+
+    # Ensure specific cluster is up if detected
+    if [ -n "$CLUSTER_VERSION" ] && [ -n "$CLUSTER_NAME" ] && command -v pg_ctlcluster &> /dev/null; then
+        sudo pg_ctlcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" start || true
+        sleep 2
+    fi
     
     # Setup user again
     sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
     sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
     
     # Test connection
-    if psql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
+    if psql $PSQL_FLAGS -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
         echo "✅ PostgreSQL fixed and connection successful"
     else
         echo "❌ PostgreSQL still not working"
@@ -215,13 +253,13 @@ echo
 
 # Auto-create database if needed
 echo "🗄️  Checking database 'mulic2_db'..."
-if ! psql -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname='mulic2_db';" | grep -q "1" 2>/dev/null; then
+if ! psql $PSQL_FLAGS -U postgres -d postgres -c "SELECT 1 FROM pg_database WHERE datname='mulic2_db';" | grep -q "1" 2>/dev/null; then
     echo "📋 Creating database 'mulic2_db'..."
     
     # Try to create database
-    if sudo -u postgres createdb mulic2_db &> /dev/null; then
+    if sudo -u postgres createdb $PSQL_FLAGS mulic2_db &> /dev/null; then
         echo "✅ Database 'mulic2_db' created successfully"
-    elif psql -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
+    elif psql $PSQL_FLAGS -U postgres -d postgres -c "CREATE DATABASE mulic2_db;" &> /dev/null; then
         echo "✅ Database 'mulic2_db' created successfully (SQL method)"
     else
         echo "❌ Failed to create database"
