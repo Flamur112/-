@@ -16,36 +16,7 @@ const router = createRouter({
       component: () => import('../views/ProfileSelection.vue'),
       meta: { title: 'Profile Selection', requiresAuth: true, hideFromMenu: true }
     },
-    {
-      path: '/agents',
-      name: 'Agents',
-      component: () => import('../views/Agents.vue'),
-      meta: { title: 'Agents', icon: 'Monitor', requiresAuth: true }
-    },
-    {
-      path: '/tasks',
-      name: 'Tasks',
-      component: () => import('../views/Tasks.vue'),
-      meta: { title: 'Tasks', icon: 'List', requiresAuth: true }
-    },
-    {
-      path: '/logs',
-      name: 'Logs',
-      component: () => import('../views/Logs.vue'),
-      meta: { title: 'Logs', icon: 'Document', requiresAuth: true }
-    },
-    {
-      path: '/settings',
-      name: 'Settings',
-      component: () => import('../views/Settings.vue'),
-      meta: { title: 'Settings', icon: 'Setting', requiresAuth: true }
-    },
-    {
-      path: '/terminal',
-      name: 'Terminal',
-      component: () => import('../views/Terminal.vue'),
-      meta: { title: 'Terminal', icon: 'Terminal', requiresAuth: true }
-    },
+
 
   ]
 })

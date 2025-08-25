@@ -155,7 +155,8 @@ const handleServerRestart = async () => {
 const handleCommand = (command: string) => {
   switch (command) {
     case 'settings':
-      router.push('/settings')
+      // Settings is now handled within the Dashboard
+      router.push('/')
       break
     case 'serverRestart':
       handleServerRestart()
