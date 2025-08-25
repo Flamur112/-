@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
+	"os" // Added for os.Stat
 	"strings"
 	"sync"
 	"time"
@@ -92,28 +92,38 @@ func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error
 	return tlsConfig, nil
 }
 
-// StartListener starts listening on the specified profile
+// StartListener starts a new C2 listener with the specified profile
 func (ls *ListenerService) StartListener(profile *Profile) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	// Stop any existing listener
+	// Check if already active
 	if ls.active {
-		ls.stopListenerInternal()
+		return fmt.Errorf("listener is already active")
 	}
 
-	// Check if port is available before starting
+	// Validate profile
+	if profile == nil {
+		return fmt.Errorf("profile cannot be nil")
+	}
+
+	// Check if port is privileged (requires root or setcap)
+	if profile.Port < 1024 {
+		log.Printf("⚠️  WARNING: Port %d is privileged (< 1024). Ensure the backend has proper permissions:", profile.Port)
+		log.Printf("   - Run as root: sudo ./mulic2")
+		log.Printf("   - Or apply setcap: sudo setcap 'cap_net_bind_service=+ep' ./mulic2")
+		log.Printf("   - Or use a non-privileged port (>= 1024)")
+	}
+
+	// Check port availability first
 	if err := ls.checkPortAvailability(profile.Host, profile.Port); err != nil {
 		return fmt.Errorf("port %d is not available: %w", profile.Port, err)
 	}
 
-	// Create address string
 	addr := fmt.Sprintf("%s:%d", profile.Host, profile.Port)
-
 	var listener net.Listener
 	var err error
 
-	// Check if TLS is enabled
 	if profile.UseTLS {
 		// Validate certificate files exist when TLS is enabled
 		if profile.CertFile == "" || profile.KeyFile == "" {
@@ -128,12 +138,11 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 			return fmt.Errorf("private key file not found: %s", profile.KeyFile)
 		}
 
-		// Create TLS configuration
+		// Load TLS configuration
 		tlsConfig, err := ls.createTLSConfig(profile)
 		if err != nil {
 			return fmt.Errorf("failed to create TLS config: %w", err)
 		}
-		ls.tlsConfig = tlsConfig
 
 		// Create TCP listener first
 		tcpListener, err := net.Listen("tcp", addr)
@@ -151,6 +160,11 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 			return fmt.Errorf("failed to start listener on %s: %w", addr, err)
 		}
 		log.Printf("🌐 Plain TCP C2 Listener started on %s (Profile: %s)", addr, profile.Name)
+	}
+
+	// Verify listener was created successfully
+	if listener == nil {
+		return fmt.Errorf("failed to create listener - listener is nil")
 	}
 
 	ls.listener = listener
