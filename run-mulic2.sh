@@ -135,6 +135,16 @@ if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
     fi
 fi
 
+# Read backend DB credentials from config so the backend and DB match
+DB_USER=$(grep -o '"user"\s*:\s*"[^"]*"' backend/config.json | sed 's/.*:"\([^"]*\)"/\1/' | head -1)
+DB_PASS=$(grep -o '"password"\s*:\s*"[^"]*"' backend/config.json | sed 's/.*:"\([^"]*\)"/\1/' | head -1)
+if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
+if [ -z "$DB_PASS" ]; then DB_PASS="postgres"; fi
+echo "🔐 Backend database credentials from backend/config.json"
+echo "   - user: $DB_USER"
+echo "   - password: (hidden)"
+echo "   - To change: edit backend/config.json and re-run this script"
+
 # Force md5 auth on Debian/Kali clusters to avoid peer failures
 PG_HBA=""
 if command -v pg_lsclusters &> /dev/null; then
@@ -164,10 +174,9 @@ if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
     sleep 2
 
     # Set password without prompt now that trust is allowed
-    echo "🔒 Setting database superuser: username=postgres, password='postgres' (default)"
-    echo "   - To change later: sudo -u postgres psql -h /var/run/postgresql -d postgres -c \"ALTER USER postgres PASSWORD 'NEW_PASSWORD';\""
-    echo "   - If you change it, also update backend/config.json -> database.password"
-    sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD 'postgres';" >/dev/null 2>&1 || true
+    echo "🔒 Ensuring DB superuser password matches backend/config.json"
+    echo "   - Setting user 'postgres' password to configured value"
+    sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD '$DB_PASS';" >/dev/null 2>&1 || true
     sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres CREATEDB;" >/dev/null 2>&1 || true
 
     # 2) Enforce md5 for everyone including postgres
@@ -211,8 +220,8 @@ if [ -n "$CLUSTER_VERSION" ] && [ -n "$CLUSTER_NAME" ] && command -v pg_ctlclust
 fi
 
 # Fix user permissions (non-interactive)
-export PGPASSWORD=postgres
-sudo -u postgres psql $PSQL_FLAGS -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null || true
+export PGPASSWORD="$DB_PASS"
+sudo -u postgres psql $PSQL_FLAGS -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD '$DB_PASS';" &> /dev/null || true
 sudo -u postgres psql $PSQL_FLAGS -h /var/run/postgresql -d postgres -c "ALTER USER postgres CREATEDB;" &> /dev/null || true
 
 # Try connection (use detected port if present)
@@ -316,7 +325,7 @@ fi
     fi
     
     # Setup user again
-    sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';" &> /dev/null
+    sudo -u postgres psql -c "ALTER USER postgres PASSWORD '$DB_PASS';" &> /dev/null
     sudo -u postgres psql -c "ALTER USER postgres CREATEDB;" &> /dev/null
     
     # Test connection
@@ -397,8 +406,25 @@ fi
 
 echo "🌐 Starting Frontend..."
 cd ../frontend
-npm run dev &
-FRONTEND_PID=$!
+if [ ! -d node_modules ]; then
+    echo "📦 Installing frontend dependencies (npm install)..."
+    npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1 || true
+fi
+
+# Start vite, fallback to npx vite if script not found
+if npm run -s dev >/dev/null 2>&1; then
+    npm run dev &
+    FRONTEND_PID=$!
+else
+    if command -v npx >/dev/null 2>&1; then
+        echo "⚠️  'npm run dev' failed, trying 'npx vite'"
+        npx vite &
+        FRONTEND_PID=$!
+    else
+        echo "❌ vite not found and no npx available. Install with: npm install -g vite"
+        FRONTEND_PID="N/A"
+    fi
+fi
 
 echo
 echo "========================================"
