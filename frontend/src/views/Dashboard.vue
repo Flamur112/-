@@ -215,127 +215,42 @@
       <el-tab-pane label="Agents" name="agents">
         <div class="agents-panel">
           <div class="panel-header">
-            <h3>Agent Management & Command Generation</h3>
-            <el-button type="primary" @click="showAgentDialog">
-              <el-icon><Plus /></el-icon>
-              Generate New Agent Command
-            </el-button>
+            <h3>Agent Management</h3>
+            <p>Manage and monitor connected agents</p>
           </div>
           
-          <!-- Agent Management Form -->
-          <div class="agent-generator">
-            <el-form :model="agentForm" label-width="150px" class="agent-form">
-              <el-row :gutter="20">
-                <el-col :span="12">
-                  <el-form-item label="Server Host:">
-                    <el-input v-model="agentForm.serverHost" placeholder="192.168.1.100" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="API Port:">
-                    <el-input v-model="agentForm.apiPort" placeholder="8080" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              
-              <el-row :gutter="20">
-                <el-col :span="12">
-                  <el-form-item label="Profile ID:">
-                    <el-select v-model="agentForm.profileId" placeholder="Select profile">
-                      <el-option
-                        v-for="profile in availableProfiles"
-                        :key="profile.id"
-                        :label="profile.name"
-                        :value="profile.id"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="Poll Interval:">
-                    <el-input v-model="agentForm.pollSeconds" placeholder="5" />
-                    <span class="form-help">seconds</span>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-              
-              <el-form-item>
-                <el-button type="primary" @click="generateAgentCommand" :loading="generatingAgentCommand">
-                  <el-icon><Setting /></el-icon>
-                  Generate Agent Command
-                </el-button>
-                <el-button @click="clearAgentForm">
-                  <el-icon><Delete /></el-icon>
-                  Clear
-                </el-button>
-                <el-button type="info" @click="autoFillFromActiveListener" v-if="hasActiveListener">
-                  <el-icon><Connection /></el-icon>
-                  Use Active Listener
-                </el-button>
-              </el-form-item>
-            </el-form>
+          <div v-if="agents.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><User /></el-icon>
+            <h3>No Agents Connected</h3>
+            <p>When agents connect to your listeners, they will appear here.</p>
           </div>
           
-          <!-- Generated Agent Command Output -->
-          <div v-if="generatedAgentCommand" class="agent-output">
-            <h3>Generated Agent Command:</h3>
-            <div class="agent-info">
-              <p><strong>Server:</strong> {{ agentForm.serverHost }}:{{ agentForm.apiPort }}</p>
-              <p><strong>Profile:</strong> {{ getProfileById(agentForm.profileId)?.name || agentForm.profileId }}</p>
-              <p><strong>Profile Port:</strong> {{ getProfileById(agentForm.profileId)?.port || 'N/A' }}</p>
-              <p><strong>Poll Interval:</strong> {{ getProfileById(agentForm.profileId)?.pollInterval || agentForm.pollSeconds }} seconds</p>
-              <p><strong>TLS:</strong> {{ getProfileById(agentForm.profileId)?.useTLS ? 'Enabled' : 'Disabled' }}</p>
-              <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
-            </div>
-            <div class="code-container">
-              <el-input
-                v-model="generatedAgentCommand"
-                type="textarea"
-                :rows="8"
-                readonly
-                class="agent-code"
-              />
-              <div class="code-actions">
-                <el-button type="success" @click="copyAgentCommand">
-                  <el-icon><CopyDocument /></el-icon>
-                  Copy to Clipboard
+          <el-table v-else :data="agents" style="width: 100%" class="agents-table">
+            <el-table-column prop="hostname" label="Hostname" width="200" />
+            <el-table-column prop="ip" label="IP Address" width="150" />
+            <el-table-column prop="username" label="User" width="120" />
+            <el-table-column prop="os" label="OS" width="100" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.status === 'online' ? 'success' : 'danger'">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastSeen" label="Last Seen" width="180" />
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="selectAgent(scope.row)">
+                  <el-icon><Select /></el-icon>
+                  Select
                 </el-button>
-                <el-button type="warning" @click="downloadAgentCommand">
-                  <el-icon><Download /></el-icon>
-                  Download as .ps1
+                <el-button size="small" type="warning" @click="disconnectAgent(scope.row)">
+                  <el-icon><Close /></el-icon>
+                  Disconnect
                 </el-button>
-                <el-button type="info" @click="saveToHistory">
-                  <el-icon><Star /></el-icon>
-                  Save to History
-                </el-button>
-              </div>
-            </div>
-          </div>
-          
-          <!-- Agent Command History -->
-          <div class="agent-history">
-            <h3>Generated Agent Commands History</h3>
-            <el-table :data="agentHistory" style="width: 100%" class="agent-history-table">
-              <el-table-column prop="timestamp" label="Generated" width="180" />
-              <el-table-column prop="serverHost" label="Server Host" width="150" />
-              <el-table-column prop="apiPort" label="API Port" width="100" />
-              <el-table-column prop="profileId" label="Profile ID" width="120" />
-              <el-table-column prop="pollSeconds" label="Poll Interval" width="120" />
-              <el-table-column prop="command" label="Command" width="300" />
-              <el-table-column label="Actions" width="150">
-                <template #default="scope">
-                  <el-button size="small" @click="loadAgentFromHistory(scope.row)">
-                    <el-icon><View /></el-icon>
-                    Load
-                  </el-button>
-                  <el-button size="small" type="danger" @click="deleteAgentFromHistory(scope.row)">
-                    <el-icon><Delete /></el-icon>
-                    Delete
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </el-tab-pane>
 
@@ -531,14 +446,7 @@ const listenerForm = ref({
 const creatingListener = ref(false)
 
 // Agent management
-const agentForm = ref({
-  serverHost: '',
-  apiPort: '8080',
-  profileId: 'default',
-  pollSeconds: '5'
-})
-const generatingAgentCommand = ref(false)
-const generatedAgentCommand = ref('')
+const agents = ref<any[]>([])
 
 interface Profile {
   id: string
@@ -558,29 +466,12 @@ interface Profile {
 
 const availableProfiles = ref<Profile[]>([])
 
-interface AgentHistoryItem {
-  id: string
-  timestamp: string
-  serverHost: string
-  apiPort: string
-  profileId: string
-  pollSeconds: string
-  command: string
-}
-
-const agentHistory = ref<AgentHistoryItem[]>([])
-
 // Load available profiles
 const loadProfiles = async () => {
   try {
     const response = await fetch('/api/profile/list')
     const data = await response.json()
     availableProfiles.value = data.profiles || []
-    
-    // Set default profile if available
-    if (availableProfiles.value.length > 0 && !agentForm.value.profileId) {
-      agentForm.value.profileId = availableProfiles.value[0].id
-    }
   } catch (error) {
     console.error('Failed to load profiles:', error)
   }
@@ -780,118 +671,27 @@ const deleteListener = async (listener: any) => {
 }
 
 // Agent management methods
-const showAgentDialog = () => {
-  // This method is not needed as the form is already visible
-  // Just ensure we're on the agents tab
-  activeTab.value = 'agents'
+const selectAgent = (agent: any) => {
+  // TODO: Implement agent selection logic
+  ElMessage.success(`Selected agent: ${agent.hostname}`)
 }
 
-const generateAgentCommand = async () => {
-  if (!agentForm.value.serverHost || !agentForm.value.apiPort) {
-    ElMessage.error('Please provide server host and API port')
-    return
-  }
-  
-  generatingAgentCommand.value = true
-  
-  try {
-    const profile = getProfileById(agentForm.value.profileId)
-    if (!profile) {
-      ElMessage.error('Profile not found or selected.')
-      return
-    }
-
-    // Use profile-specific settings
-    const pollInterval = profile.pollInterval || parseInt(agentForm.value.pollSeconds)
-    const command = `Start-MuliAgent -ServerHost ${agentForm.value.serverHost} -ApiPort ${agentForm.value.apiPort} -ProfileId ${agentForm.value.profileId} -PollSeconds ${pollInterval}`
-    generatedAgentCommand.value = command
-    
-    ElMessage.success('Agent command generated successfully!')
-  } catch (error) {
-    ElMessage.error('Failed to generate agent command: ' + error)
-  } finally {
-    generatingAgentCommand.value = false
-  }
-}
-
-const clearAgentForm = () => {
-  agentForm.value = {
-    serverHost: '',
-    apiPort: '8080',
-    profileId: 'default',
-    pollSeconds: '5'
-  }
-  generatedAgentCommand.value = ''
-}
-
-const copyAgentCommand = async () => {
-  try {
-    await navigator.clipboard.writeText(generatedAgentCommand.value)
-    ElMessage.success('Agent command copied to clipboard')
-  } catch (error) {
-    ElMessage.error('Failed to copy agent command')
-  }
-}
-
-const downloadAgentCommand = () => {
-  const blob = new Blob([generatedAgentCommand.value], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `agent_command_${agentForm.value.serverHost}_${agentForm.value.apiPort}.ps1`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  ElMessage.success('Agent command downloaded')
-}
-
-const saveToHistory = () => {
-  const historyItem = {
-    id: Date.now().toString(),
-    timestamp: new Date().toLocaleString(),
-    serverHost: agentForm.value.serverHost,
-    apiPort: agentForm.value.apiPort,
-    profileId: agentForm.value.profileId,
-    pollSeconds: agentForm.value.pollSeconds,
-    command: generatedAgentCommand.value
-  }
-  
-  agentHistory.value.unshift(historyItem)
-  ElMessage.success('Agent command saved to history')
-}
-
-const loadAgentFromHistory = (item: any) => {
-  agentForm.value.serverHost = item.serverHost
-  agentForm.value.apiPort = item.apiPort
-  agentForm.value.profileId = item.profileId
-  agentForm.value.pollSeconds = item.pollSeconds
-  generatedAgentCommand.value = item.command
-  ElMessage.success('Agent command loaded from history')
-}
-
-const deleteAgentFromHistory = async (item: any) => {
+const disconnectAgent = async (agent: any) => {
   try {
     await ElMessageBox.confirm(
-      'Delete this agent command from history?',
-      'Delete Agent Command',
-      { confirmButtonText: 'Delete', cancelButtonText: 'Cancel', type: 'warning' }
+      `Disconnect agent ${agent.hostname}?`,
+      'Disconnect Agent',
+      { confirmButtonText: 'Disconnect', cancelButtonText: 'Cancel', type: 'warning' }
     )
     
-    agentHistory.value = agentHistory.value.filter(h => h.id !== item.id)
-    ElMessage.success('Agent command deleted from history')
+    // TODO: Implement actual agent disconnection logic
+    ElMessage.success(`Disconnected agent: ${agent.hostname}`)
   } catch {
     // User cancelled
   }
 }
 
-const autoFillFromActiveListener = () => {
-  if (activeListener.value) {
-    agentForm.value.serverHost = activeListener.value.host === '0.0.0.0' ? '127.0.0.1' : activeListener.value.host
-    agentForm.value.apiPort = activeListener.value.port
-    ElMessage.success(`Auto-filled from active listener: ${activeListener.value.name}`)
-  }
-}
+
 
 // Utility functions
 const getImplantTypeColor = (type: string) => {

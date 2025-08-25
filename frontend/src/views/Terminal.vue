@@ -8,17 +8,14 @@
     <div class="agent-controls">
       <div class="control-section">
         <h3>Agent Status</h3>
-        <p>Agents will automatically register and poll for tasks when running the PowerShell payload.</p>
+        <p>Monitor and manage connected agents from this interface.</p>
       </div>
       
       <div class="control-section">
-        <h3>PowerShell Payload</h3>
-        <p>Use the following command to start an agent:</p>
-        <div class="code-block">
-          <code>Start-MuliAgent -ServerHost YOUR_SERVER_IP -ApiPort 8080 -ProfileId default -PollSeconds 5</code>
-              </div>
-            </div>
-          </div>
+        <h3>Agent Management</h3>
+        <p>Use the Agents tab in the main dashboard to view and manage connected agents.</p>
+      </div>
+    </div>
   </div>
 </template>
 
