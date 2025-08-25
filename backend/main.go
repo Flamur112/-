@@ -307,8 +307,8 @@ func main() {
 	log.Println("Shutting down server...")
 
 	// Stop listener service
-	if err := listenerService.StopListener(); err != nil {
-		log.Printf("Error stopping listener: %v", err)
+	if err := listenerService.StopAllListeners(); err != nil {
+		log.Printf("Error stopping listeners: %v", err)
 	}
 
 	log.Println("Server stopped")
