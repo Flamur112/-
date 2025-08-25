@@ -158,10 +158,10 @@ func main() {
 	api.HandleFunc("/agent/tasks", agentHandler.FetchTasks).Methods("GET")
 	api.HandleFunc("/agent/result", agentHandler.SubmitResult).Methods("POST")
 
-	// Operator endpoints
-	api.HandleFunc("/agents", operatorHandler.ListAgents).Methods("GET")
-	api.HandleFunc("/tasks", operatorHandler.EnqueueTask).Methods("POST")
-	api.HandleFunc("/agent-tasks", operatorHandler.GetAgentTasks).Methods("GET")
+	// Operator endpoints (protected)
+	api.Handle("/agents", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.ListAgents))).Methods("GET")
+	api.Handle("/tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.EnqueueTask))).Methods("POST")
+	api.Handle("/agent-tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.GetAgentTasks))).Methods("GET")
 
 	// Health check endpoint
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

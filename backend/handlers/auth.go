@@ -194,7 +194,17 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // GetProfile returns the current user's profile
 func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Get user from context (set by middleware)
-	userID := r.Context().Value("user_id").(int)
+	userIDInterface := r.Context().Value("user_id")
+	if userIDInterface == nil {
+		http.Error(w, "Unauthorized - user not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	userID, ok := userIDInterface.(int)
+	if !ok {
+		http.Error(w, "Invalid user ID format", http.StatusInternalServerError)
+		return
+	}
 
 	// Get user details from database
 	var user models.User
@@ -204,7 +214,11 @@ func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	`, userID).Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.IsActive, &user.CreatedAt, &user.LastLogin)
 
 	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -246,9 +260,9 @@ func (h *AuthHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/auth/register", h.Register).Methods("POST")
 	router.HandleFunc("/auth/login", h.Login).Methods("POST")
 	router.HandleFunc("/auth/logout", h.Logout).Methods("POST")
-	router.HandleFunc("/auth/profile", h.GetProfile).Methods("GET")
 
-	// Per-user listener settings (protected)
+	// Protected routes
+	router.Handle("/auth/profile", utils.AuthMiddleware(http.HandlerFunc(h.GetProfile))).Methods("GET")
 	router.Handle("/settings/listener", utils.AuthMiddleware(http.HandlerFunc(h.GetListenerSettings))).Methods("GET")
 	router.Handle("/settings/listener", utils.AuthMiddleware(http.HandlerFunc(h.UpdateListenerSettings))).Methods("PUT")
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"mulic2/services"
+	"mulic2/utils"
 	"net"
 	"net/http"
 	"regexp"
@@ -30,12 +31,13 @@ func NewProfileHandler(db *sql.DB, listenerService *services.ListenerService) *P
 
 // RegisterRoutes registers the profile routes
 func (h *ProfileHandler) RegisterRoutes(router *mux.Router) {
-	router.HandleFunc("/profile/start", h.StartListener).Methods("POST")
-	router.HandleFunc("/profile/stop", h.StopListener).Methods("POST")
-	router.HandleFunc("/profile/status", h.GetStatus).Methods("GET")
-	router.HandleFunc("/profile/list", h.ListProfiles).Methods("GET")
-	router.HandleFunc("/profile/create", h.CreateProfile).Methods("POST")
-	router.HandleFunc("/profile/get", h.GetProfile).Methods("GET")
+	// Protected routes - only authenticated users can manage profiles
+	router.Handle("/profile/start", utils.AuthMiddleware(http.HandlerFunc(h.StartListener))).Methods("POST")
+	router.Handle("/profile/stop", utils.AuthMiddleware(http.HandlerFunc(h.StopListener))).Methods("POST")
+	router.Handle("/profile/status", utils.AuthMiddleware(http.HandlerFunc(h.GetStatus))).Methods("GET")
+	router.Handle("/profile/list", utils.AuthMiddleware(http.HandlerFunc(h.ListProfiles))).Methods("GET")
+	router.Handle("/profile/create", utils.AuthMiddleware(http.HandlerFunc(h.CreateProfile))).Methods("POST")
+	router.Handle("/profile/get", utils.AuthMiddleware(http.HandlerFunc(h.GetProfile))).Methods("GET")
 }
 
 // StartListenerRequest represents the request to start a listener
