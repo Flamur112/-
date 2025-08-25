@@ -211,72 +211,60 @@
         </div>
       </el-tab-pane>
 
-      <!-- Payloads Panel -->
-      <el-tab-pane label="Payloads" name="payloads">
-        <div class="payloads-panel">
+      <!-- Agents Panel -->
+      <el-tab-pane label="Agents" name="agents">
+        <div class="agents-panel">
           <div class="panel-header">
-            <h3>Payload Generation & Management</h3>
-            <el-button type="primary" @click="showPayloadDialog">
+            <h3>Agent Management & Command Generation</h3>
+            <el-button type="primary" @click="showAgentDialog">
               <el-icon><Plus /></el-icon>
-              Generate New Payload
+              Generate New Agent Command
             </el-button>
           </div>
           
-          <!-- Payload Generation Form -->
-          <div class="payload-generator">
-            <el-form :model="payloadForm" label-width="150px" class="payload-form">
+          <!-- Agent Management Form -->
+          <div class="agent-generator">
+            <el-form :model="agentForm" label-width="150px" class="agent-form">
               <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item label="Target IP:">
-                    <el-input v-model="payloadForm.targetIP" placeholder="192.168.1.100" />
+                  <el-form-item label="Server Host:">
+                    <el-input v-model="agentForm.serverHost" placeholder="192.168.1.100" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
-                  <el-form-item label="Target Port:">
-                    <el-input v-model="payloadForm.targetPort" placeholder="4444" />
+                  <el-form-item label="API Port:">
+                    <el-input v-model="agentForm.apiPort" placeholder="8080" />
                   </el-form-item>
                 </el-col>
               </el-row>
               
               <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item label="Payload Type:">
-                    <el-select v-model="payloadForm.type" placeholder="Select payload type">
-                      <el-option label="PowerShell (.ps1)" value="ps1" />
-                      <el-option label="Executable (.exe)" value="exe" />
-                      <el-option label="Binary (.bin)" value="bin" />
-                      <el-option label="Python (.py)" value="py" />
-                      <el-option label="Batch (.bat)" value="bat" />
+                  <el-form-item label="Profile ID:">
+                    <el-select v-model="agentForm.profileId" placeholder="Select profile">
+                      <el-option
+                        v-for="profile in availableProfiles"
+                        :key="profile.id"
+                        :label="profile.name"
+                        :value="profile.id"
+                      />
                     </el-select>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
-                  <el-form-item label="Output Format:">
-                    <el-select v-model="payloadForm.outputFormat" placeholder="Select output format">
-                      <el-option label="Raw Code" value="raw" />
-                      <el-option label="Base64 Encoded" value="base64" />
-                      <el-option label="Compressed" value="compressed" />
-                    </el-select>
+                  <el-form-item label="Poll Interval:">
+                    <el-input v-model="agentForm.pollSeconds" placeholder="5" />
+                    <span class="form-help">seconds</span>
                   </el-form-item>
                 </el-col>
               </el-row>
-              
-              <el-form-item label="Additional Options:">
-                <el-checkbox-group v-model="payloadForm.options">
-                  <el-checkbox label="Bypass AMSI" value="bypass-amsi" />
-                  <el-checkbox label="Bypass Defender" value="bypass-defender" />
-                  <el-checkbox label="Use HTTPS" value="use-https" />
-                  <el-checkbox label="Randomize Variables" value="randomize-vars" />
-                  <el-checkbox label="Add Persistence" value="persistence" />
-                </el-checkbox-group>
-              </el-form-item>
               
               <el-form-item>
-                <el-button type="primary" @click="generatePayload" :loading="generatingPayload">
+                <el-button type="primary" @click="generateAgentCommand" :loading="generatingAgentCommand">
                   <el-icon><Setting /></el-icon>
-                  Generate Payload
+                  Generate Agent Command
                 </el-button>
-                <el-button @click="clearPayloadForm">
+                <el-button @click="clearAgentForm">
                   <el-icon><Delete /></el-icon>
                   Clear
                 </el-button>
@@ -288,30 +276,33 @@
             </el-form>
           </div>
           
-          <!-- Generated Payload Output -->
-          <div v-if="generatedPayload" class="payload-output">
-            <h3>Generated Payload:</h3>
-            <div class="payload-info">
-              <p><strong>Type:</strong> {{ payloadForm.type.toUpperCase() }}</p>
-              <p><strong>Target:</strong> {{ payloadForm.targetIP }}:{{ payloadForm.targetPort }}</p>
+          <!-- Generated Agent Command Output -->
+          <div v-if="generatedAgentCommand" class="agent-output">
+            <h3>Generated Agent Command:</h3>
+            <div class="agent-info">
+              <p><strong>Server:</strong> {{ agentForm.serverHost }}:{{ agentForm.apiPort }}</p>
+              <p><strong>Profile:</strong> {{ getProfileById(agentForm.profileId)?.name || agentForm.profileId }}</p>
+              <p><strong>Profile Port:</strong> {{ getProfileById(agentForm.profileId)?.port || 'N/A' }}</p>
+              <p><strong>Poll Interval:</strong> {{ getProfileById(agentForm.profileId)?.pollInterval || agentForm.pollSeconds }} seconds</p>
+              <p><strong>TLS:</strong> {{ getProfileById(agentForm.profileId)?.useTLS ? 'Enabled' : 'Disabled' }}</p>
               <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
             </div>
             <div class="code-container">
               <el-input
-                v-model="generatedPayload"
+                v-model="generatedAgentCommand"
                 type="textarea"
-                :rows="15"
+                :rows="8"
                 readonly
-                class="payload-code"
+                class="agent-code"
               />
               <div class="code-actions">
-                <el-button type="success" @click="copyPayload">
+                <el-button type="success" @click="copyAgentCommand">
                   <el-icon><CopyDocument /></el-icon>
                   Copy to Clipboard
                 </el-button>
-                <el-button type="warning" @click="downloadPayload">
+                <el-button type="warning" @click="downloadAgentCommand">
                   <el-icon><Download /></el-icon>
-                  Download as .{{ payloadForm.type }}
+                  Download as .ps1
                 </el-button>
                 <el-button type="info" @click="saveToHistory">
                   <el-icon><Star /></el-icon>
@@ -321,24 +312,26 @@
             </div>
           </div>
           
-          <!-- Payload History -->
-          <div class="payload-history">
-            <h3>Generated Payloads History</h3>
-            <el-table :data="payloadHistory" style="width: 100%" class="payload-history-table">
+          <!-- Agent Command History -->
+          <div class="agent-history">
+            <h3>Generated Agent Commands History</h3>
+            <el-table :data="agentHistory" style="width: 100%" class="agent-history-table">
               <el-table-column prop="timestamp" label="Generated" width="180" />
-              <el-table-column prop="type" label="Type" width="100" />
-              <el-table-column prop="targetIP" label="Target IP" width="120" />
-              <el-table-column prop="targetPort" label="Port" width="80" />
-              <el-table-column prop="options" label="Options" width="200" />
+              <el-table-column prop="serverHost" label="Server Host" width="150" />
+              <el-table-column prop="apiPort" label="API Port" width="100" />
+              <el-table-column prop="profileId" label="Profile ID" width="120" />
+              <el-table-column prop="pollSeconds" label="Poll Interval" width="120" />
+              <el-table-column prop="command" label="Command" width="300" />
               <el-table-column label="Actions" width="150">
                 <template #default="scope">
-                  <el-button size="small" @click="loadPayloadFromHistory(scope.row)">
+                  <el-button size="small" @click="loadAgentFromHistory(scope.row)">
                     <el-icon><View /></el-icon>
                     Load
                   </el-button>
-                  <el-button size="small" type="danger" @click="deletePayloadFromHistory(scope.row)">
+                  <el-button size="small" type="danger" @click="deleteAgentFromHistory(scope.row)">
                     <el-icon><Delete /></el-icon>
-      </el-button>
+                    Delete
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -350,25 +343,20 @@
       <el-tab-pane label="Remote Control" name="vnc">
         <div class="vnc-panel">
           <div class="panel-header">
-            <h3>Reverse VNC / Remote Control</h3>
+            <h3>Remote Control & VNC</h3>
             <el-button type="primary" disabled>
               <el-icon><Monitor /></el-icon>
               Connect VNC (Coming Soon)
-      </el-button>
-    </div>
-
-          <div class="placeholder-content">
-            <el-icon size="64" color="#909399"><Monitor /></el-icon>
-            <h3>Remote Control</h3>
-            <p>This feature will be implemented later to provide:</p>
-            <ul>
-              <li>Stream GUI of connected machines</li>
-              <li>Control mouse/keyboard through the dashboard</li>
-              <li>Screen recording and snapshots</li>
-              <li>Real-time remote desktop access</li>
-            </ul>
+            </el-button>
           </div>
-    </div>
+          
+          <div class="empty-state">
+            <el-icon size="48"><Monitor /></el-icon>
+            <h3>Remote Control Features</h3>
+            <p>VNC and remote control functionality will be implemented in future versions.</p>
+            <p>This will allow direct screen sharing and remote control of compromised hosts.</p>
+          </div>
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -383,15 +371,14 @@
             v-model="commandForm.command"
             type="textarea"
             :rows="4"
-            placeholder="Enter PowerShell command, script, or payload execution command..."
+            placeholder="Enter command to execute on the target agent..."
           />
         </el-form-item>
-        <el-form-item label="Type:">
+        <el-form-item label="Command Type:">
           <el-select v-model="commandForm.type" placeholder="Select command type">
-            <el-option label="PowerShell Command" value="powershell" />
-            <el-option label="Script Execution" value="script" />
-            <el-option label="Payload Execution" value="payload" />
-            <el-option label="System Command" value="system" />
+            <el-option label="Shell Command" value="shell" />
+            <el-option label="PowerShell" value="powershell" />
+            <el-option label="Script" value="script" />
           </el-select>
         </el-form-item>
         <el-form-item label="Schedule:">
@@ -457,7 +444,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { PayloadGenerator, type PayloadConfig } from '../utils/payloadGenerator'
 
 // Types
 interface Implant {
@@ -527,7 +513,7 @@ const selectedImplant = ref('')
 const selectedImplantName = ref('')
 const commandForm = ref({
   command: '',
-  type: 'powershell',
+  type: 'shell',
   scheduled: false,
   executeAt: null
 })
@@ -544,27 +530,66 @@ const listenerForm = ref({
 })
 const creatingListener = ref(false)
 
-// Payload generation
-const payloadForm = ref({
-  targetIP: '',
-  targetPort: '4444',
-  type: 'ps1',
-  outputFormat: 'raw',
-  options: ['bypass-amsi', 'randomize-vars']
+// Agent management
+const agentForm = ref({
+  serverHost: '',
+  apiPort: '8080',
+  profileId: 'default',
+  pollSeconds: '5'
 })
-const generatingPayload = ref(false)
-const generatedPayload = ref('')
-interface PayloadHistoryItem {
+const generatingAgentCommand = ref(false)
+const generatedAgentCommand = ref('')
+
+interface Profile {
   id: string
-  timestamp: string
-  type: string
-  targetIP: string
-  targetPort: string
-  options: string
-  payload: string
+  name: string
+  projectName?: string
+  host: string
+  port: number
+  description?: string
+  useTLS: boolean
+  certFile?: string
+  keyFile?: string
+  pollInterval: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
 }
 
-const payloadHistory = ref<PayloadHistoryItem[]>([])
+const availableProfiles = ref<Profile[]>([])
+
+interface AgentHistoryItem {
+  id: string
+  timestamp: string
+  serverHost: string
+  apiPort: string
+  profileId: string
+  pollSeconds: string
+  command: string
+}
+
+const agentHistory = ref<AgentHistoryItem[]>([])
+
+// Load available profiles
+const loadProfiles = async () => {
+  try {
+    const response = await fetch('/api/profile/list')
+    const data = await response.json()
+    availableProfiles.value = data.profiles || []
+    
+    // Set default profile if available
+    if (availableProfiles.value.length > 0 && !agentForm.value.profileId) {
+      agentForm.value.profileId = availableProfiles.value[0].id
+    }
+  } catch (error) {
+    console.error('Failed to load profiles:', error)
+  }
+}
+
+// Get profile by ID
+const getProfileById = (profileId: string): Profile | undefined => {
+  return availableProfiles.value.find(p => p.id === profileId)
+}
 
 // Computed properties
 const onlineImplants = computed(() => {
@@ -754,109 +779,107 @@ const deleteListener = async (listener: any) => {
   }
 }
 
-// Payload generation methods
-const showPayloadDialog = () => {
+// Agent management methods
+const showAgentDialog = () => {
   // This method is not needed as the form is already visible
-  // Just ensure we're on the payloads tab
-  activeTab.value = 'payloads'
+  // Just ensure we're on the agents tab
+  activeTab.value = 'agents'
 }
 
-const generatePayload = async () => {
-  if (!payloadForm.value.targetIP || !payloadForm.value.targetPort) {
-    ElMessage.error('Please provide target IP and port')
+const generateAgentCommand = async () => {
+  if (!agentForm.value.serverHost || !agentForm.value.apiPort) {
+    ElMessage.error('Please provide server host and API port')
     return
   }
   
-  generatingPayload.value = true
+  generatingAgentCommand.value = true
   
   try {
-    // Use the PayloadGenerator utility
-    const payloadConfig: PayloadConfig = {
-      targetIP: payloadForm.value.targetIP,
-      targetPort: payloadForm.value.targetPort,
-      type: payloadForm.value.type,
-      outputFormat: payloadForm.value.outputFormat,
-      options: payloadForm.value.options
+    const profile = getProfileById(agentForm.value.profileId)
+    if (!profile) {
+      ElMessage.error('Profile not found or selected.')
+      return
     }
+
+    // Use profile-specific settings
+    const pollInterval = profile.pollInterval || parseInt(agentForm.value.pollSeconds)
+    const command = `Start-MuliAgent -ServerHost ${agentForm.value.serverHost} -ApiPort ${agentForm.value.apiPort} -ProfileId ${agentForm.value.profileId} -PollSeconds ${pollInterval}`
+    generatedAgentCommand.value = command
     
-    const result = await PayloadGenerator.generatePayload(payloadConfig)
-    generatedPayload.value = result.code
-    
-    ElMessage.success('Payload generated successfully!')
+    ElMessage.success('Agent command generated successfully!')
   } catch (error) {
-    ElMessage.error('Failed to generate payload: ' + error)
+    ElMessage.error('Failed to generate agent command: ' + error)
   } finally {
-    generatingPayload.value = false
+    generatingAgentCommand.value = false
   }
 }
 
-
-
-const clearPayloadForm = () => {
-  payloadForm.value = {
-    targetIP: '',
-    targetPort: '4444',
-    type: 'ps1',
-    outputFormat: 'raw',
-    options: ['bypass-amsi', 'randomize-vars']
+const clearAgentForm = () => {
+  agentForm.value = {
+    serverHost: '',
+    apiPort: '8080',
+    profileId: 'default',
+    pollSeconds: '5'
   }
-  generatedPayload.value = ''
+  generatedAgentCommand.value = ''
 }
 
-const copyPayload = async () => {
+const copyAgentCommand = async () => {
   try {
-    await navigator.clipboard.writeText(generatedPayload.value)
-    ElMessage.success('Payload copied to clipboard')
+    await navigator.clipboard.writeText(generatedAgentCommand.value)
+    ElMessage.success('Agent command copied to clipboard')
   } catch (error) {
-    ElMessage.error('Failed to copy payload')
+    ElMessage.error('Failed to copy agent command')
   }
 }
 
-const downloadPayload = () => {
-  const blob = new Blob([generatedPayload.value], { type: 'text/plain' })
+const downloadAgentCommand = () => {
+  const blob = new Blob([generatedAgentCommand.value], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `payload_${payloadForm.value.targetIP}_${payloadForm.value.targetPort}.${payloadForm.value.type}`
+  a.download = `agent_command_${agentForm.value.serverHost}_${agentForm.value.apiPort}.ps1`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
-  ElMessage.success('Payload downloaded')
+  ElMessage.success('Agent command downloaded')
 }
 
 const saveToHistory = () => {
   const historyItem = {
     id: Date.now().toString(),
     timestamp: new Date().toLocaleString(),
-    type: payloadForm.value.type.toUpperCase(),
-    targetIP: payloadForm.value.targetIP,
-    targetPort: payloadForm.value.targetPort,
-    options: payloadForm.value.options.join(', '),
-    payload: generatedPayload.value
+    serverHost: agentForm.value.serverHost,
+    apiPort: agentForm.value.apiPort,
+    profileId: agentForm.value.profileId,
+    pollSeconds: agentForm.value.pollSeconds,
+    command: generatedAgentCommand.value
   }
   
-  payloadHistory.value.unshift(historyItem)
-  ElMessage.success('Payload saved to history')
+  agentHistory.value.unshift(historyItem)
+  ElMessage.success('Agent command saved to history')
 }
 
-const loadPayloadFromHistory = (item: any) => {
-  payloadForm.value.targetIP = item.targetIP
-  payloadForm.value.targetPort = item.targetPort
-  generatedPayload.value = item.payload
-  ElMessage.success('Payload loaded from history')
+const loadAgentFromHistory = (item: any) => {
+  agentForm.value.serverHost = item.serverHost
+  agentForm.value.apiPort = item.apiPort
+  agentForm.value.profileId = item.profileId
+  agentForm.value.pollSeconds = item.pollSeconds
+  generatedAgentCommand.value = item.command
+  ElMessage.success('Agent command loaded from history')
 }
 
-const deletePayloadFromHistory = async (item: any) => {
+const deleteAgentFromHistory = async (item: any) => {
   try {
     await ElMessageBox.confirm(
-      'Delete this payload from history?',
-      'Delete Payload',
+      'Delete this agent command from history?',
+      'Delete Agent Command',
       { confirmButtonText: 'Delete', cancelButtonText: 'Cancel', type: 'warning' }
     )
     
-    payloadHistory.value = payloadHistory.value.filter(h => h.id !== item.id)
-    ElMessage.success('Payload deleted from history')
+    agentHistory.value = agentHistory.value.filter(h => h.id !== item.id)
+    ElMessage.success('Agent command deleted from history')
   } catch {
     // User cancelled
   }
@@ -864,8 +887,8 @@ const deletePayloadFromHistory = async (item: any) => {
 
 const autoFillFromActiveListener = () => {
   if (activeListener.value) {
-    payloadForm.value.targetIP = activeListener.value.host === '0.0.0.0' ? '127.0.0.1' : activeListener.value.host
-    payloadForm.value.targetPort = activeListener.value.port
+    agentForm.value.serverHost = activeListener.value.host === '0.0.0.0' ? '127.0.0.1' : activeListener.value.host
+    agentForm.value.apiPort = activeListener.value.port
     ElMessage.success(`Auto-filled from active listener: ${activeListener.value.name}`)
   }
 }
@@ -873,7 +896,7 @@ const autoFillFromActiveListener = () => {
 // Utility functions
 const getImplantTypeColor = (type: string) => {
   switch (type) {
-    case 'reverse-shell': return 'primary'
+    case 'agent': return 'primary'
     case 'beacon': return 'success'
     case 'vnc': return 'warning'
     default: return 'info'
@@ -895,6 +918,7 @@ const getTaskStatusColor = (status: string) => {
 onMounted(() => {
   updateStats()
   loadDashboardData()
+  loadProfiles() // Load profiles on mount
 })
 
 // Update dashboard statistics
@@ -1057,102 +1081,11 @@ const loadDashboardData = async () => {
   }
 }
 
-/* Payloads Panel */
-.payloads-panel {
-  padding: 20px;
-}
-
-.payload-generator {
-  background: var(--secondary-black);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.payload-form {
-  max-width: 800px;
-}
-
-.payload-output {
-  background: var(--secondary-black);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-}
-
-.payload-info {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 15px;
-  padding: 10px;
-  background: var(--primary-black);
-  border-radius: 4px;
-}
-
-.payload-info p {
-  margin: 0;
-  font-size: 14px;
-}
-
-.code-container {
-  position: relative;
-}
-
-.payload-code {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-}
-
-.code-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 15px;
-  justify-content: center;
-}
-
-.payload-history {
-  background: var(--secondary-black);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 20px;
-}
-
-.payload-history-table {
-  margin-top: 15px;
-}
-
-/* Payload code textarea styling */
-.payload-code :deep(.el-textarea__inner) {
-  font-family: 'Courier New', monospace;
-}
-
-/* Empty state styling */
-.empty-state {
-  text-align: center;
-  padding: 60px 20px;
-  color: var(--text-gray);
-  
-  h3 {
-    color: var(--text-white);
-    margin: 20px 0 15px 0;
-    font-size: 18px;
-    font-weight: 600;
-  }
-  
-  p {
-    color: var(--text-gray);
-    font-size: 14px;
-    margin: 0;
-  }
-}
-
 /* Fix text colors for all panels */
 .implants-panel,
 .tasks-panel,
 .listeners-panel,
-.payloads-panel,
+.agents-panel,
 .overview-panel {
   color: var(--text-white);
 }
@@ -1269,7 +1202,7 @@ const loadDashboardData = async () => {
 .implants-panel *,
 .tasks-panel *,
 .listeners-panel *,
-.payloads-panel *,
+.agents-panel *,
 .overview-panel * {
   background: transparent !important;
 }
@@ -1278,7 +1211,7 @@ const loadDashboardData = async () => {
 .implants-panel > *,
 .tasks-panel > *,
 .listeners-panel > *,
-.payloads-panel > *,
+.agents-panel > *,
 .overview-panel > * {
   background: transparent !important;
 }
@@ -1287,7 +1220,7 @@ const loadDashboardData = async () => {
 .implants-panel div,
 .tasks-panel div,
 .listeners-panel div,
-.payloads-panel div,
+.agents-panel div,
 .overview-panel div {
   background: transparent !important;
 }
@@ -1426,6 +1359,107 @@ const loadDashboardData = async () => {
 :deep(.el-dialog__footer) {
   background: var(--primary-black) !important;
   border-top: 1px solid var(--border-color) !important;
+}
+
+/* Agents Panel */
+.agents-panel {
+  padding: 20px;
+}
+
+.agents-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.agents-panel .panel-header h3 {
+  margin: 0;
+  color: var(--text-white);
+}
+
+.agents-panel .agent-generator {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.agents-panel .agent-form {
+  max-width: 800px;
+}
+
+.agents-panel .form-help {
+  color: var(--text-gray);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.agents-panel .agent-output {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.agents-panel .agent-info {
+  margin-bottom: 15px;
+}
+
+.agents-panel .agent-info p {
+  margin: 5px 0;
+  color: var(--text-gray);
+}
+
+.agents-panel .code-container {
+  margin-top: 15px;
+}
+
+.agents-panel .agent-code {
+  margin-bottom: 15px;
+}
+
+.agents-panel .code-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.agents-panel .agent-history {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.agents-panel .agent-history h3 {
+  margin: 0 0 15px 0;
+  color: var(--text-white);
+}
+
+.agents-panel .agent-history-table {
+  margin-top: 15px;
+}
+
+/* Responsive design for agents panel */
+@media (max-width: 768px) {
+  .agents-panel {
+    padding: 15px;
+  }
+  
+  .agents-panel .panel-header {
+    flex-direction: column;
+    gap: 15px;
+    align-items: stretch;
+  }
+  
+  .agents-panel .agent-form .el-row .el-col {
+    margin-bottom: 15px;
+  }
+  
+  .agents-panel .code-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>
 

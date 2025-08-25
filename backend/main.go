@@ -24,8 +24,13 @@ import (
 // Config holds the application configuration
 type Config struct {
 	Server struct {
-		APIPort       int `json:"api_port"`
-		C2DefaultPort int `json:"c2_default_port"`
+		APIPort        int    `json:"api_port"`
+		C2DefaultPort  int    `json:"c2_default_port"`
+		TLSEnabled     bool   `json:"tls_enabled"`
+		TLSMinVersion  string `json:"tls_min_version"`
+		TLSMaxVersion  string `json:"tls_max_version"`
+		APIUnified     bool   `json:"api_unified"`
+		APIUnifiedPort int    `json:"api_unified_port"`
 	} `json:"server"`
 	Profiles []struct {
 		ID          string `json:"id"`
@@ -133,6 +138,8 @@ func main() {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(db)
 	profileHandler := handlers.NewProfileHandler(db, listenerService)
+	agentHandler := handlers.NewAgentHandler(db)
+	operatorHandler := handlers.NewOperatorHandler(db)
 
 	// Create router
 	router := mux.NewRouter()
@@ -144,6 +151,17 @@ func main() {
 	// Register routes under /api
 	authHandler.RegisterRoutes(api)
 	profileHandler.RegisterRoutes(api)
+
+	// Agent routes (REST)
+	api.HandleFunc("/agent/register", agentHandler.Register).Methods("POST")
+	api.HandleFunc("/agent/heartbeat", agentHandler.Heartbeat).Methods("POST")
+	api.HandleFunc("/agent/tasks", agentHandler.FetchTasks).Methods("GET")
+	api.HandleFunc("/agent/result", agentHandler.SubmitResult).Methods("POST")
+
+	// Operator endpoints
+	api.HandleFunc("/agents", operatorHandler.ListAgents).Methods("GET")
+	api.HandleFunc("/tasks", operatorHandler.EnqueueTask).Methods("POST")
+	api.HandleFunc("/agent-tasks", operatorHandler.GetAgentTasks).Methods("GET")
 
 	// Health check endpoint
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +179,12 @@ func main() {
 		w.Write([]byte(`{"message": "Access granted to protected resource"}`))
 	}).Methods("GET")
 
+	// Set router for unified API mode
+	if config.Server.APIUnified {
+		listenerService.SetRouter(router)
+		log.Printf("🔗 Router configured for unified API mode")
+	}
+
 	// Start server
 	apiPort := fmt.Sprintf("%d", config.Server.APIPort)
 	c2Port := fmt.Sprintf("%d", config.Server.C2DefaultPort)
@@ -172,39 +196,53 @@ func main() {
 	if config.Server.C2DefaultPort <= 0 || config.Server.C2DefaultPort > 65535 {
 		log.Fatalf("Invalid C2 default port: %d. Port must be between 1 and 65535", config.Server.C2DefaultPort)
 	}
-	if config.Server.APIPort == config.Server.C2DefaultPort {
-		log.Fatalf("API port (%d) and C2 default port (%d) cannot be the same", config.Server.APIPort, config.Server.C2DefaultPort)
+
+	// Check unified API mode
+	if config.Server.APIUnified {
+		log.Printf("🔗 UNIFIED MODE: API will be served through TLS listener on port %d", config.Server.APIUnifiedPort)
+		if config.Server.APIPort == config.Server.APIUnifiedPort {
+			log.Printf("⚠️  WARNING: API port and unified port are the same - API will be served through TLS")
+		}
+	} else {
+		if config.Server.APIPort == config.Server.C2DefaultPort {
+			log.Fatalf("API port (%d) and C2 default port (%d) cannot be the same in separated mode", config.Server.APIPort, config.Server.C2DefaultPort)
+		}
+		log.Printf("🔌 SEPARATED MODE: API on port %s, C2 listeners on separate ports", apiPort)
 	}
 
 	log.Printf("Starting MuliC2 server on port %s", apiPort)
 	log.Printf("C2 listeners will use port %s by default", c2Port)
 	log.Printf("⚠️  IMPORTANT: C2 listeners will ONLY use the exact ports specified in profiles - NO FALLBACK PORTS!")
 
-	// Test if API port is available
-	testListener, err := net.Listen("tcp", ":"+apiPort)
-	if err != nil {
-		log.Fatalf("❌ FAILED: Cannot bind to API port %s: %v", apiPort, err)
+	// Test if API port is available (only in separated mode)
+	if !config.Server.APIUnified {
+		testListener, err := net.Listen("tcp", ":"+apiPort)
+		if err != nil {
+			log.Fatalf("❌ FAILED: Cannot bind to API port %s: %v", apiPort, err)
+		}
+		testListener.Close()
+		log.Printf("✅ API port %s is available", apiPort)
 	}
-	testListener.Close()
-	log.Printf("✅ API port %s is available", apiPort)
 
 	// Set up graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in a goroutine
-	go func() {
-		log.Printf("Server starting on port %s...", apiPort)
-		addr := ":" + apiPort
-		log.Printf("Binding to address: %s", addr)
-		if err := http.ListenAndServe(addr, router); err != nil {
-			log.Printf("Server error: %v", err)
-		}
-	}()
+	// Start server in a goroutine (only in separated mode)
+	if !config.Server.APIUnified {
+		go func() {
+			log.Printf("Server starting on port %s...", apiPort)
+			addr := ":" + apiPort
+			log.Printf("Binding to address: %s", addr)
+			if err := http.ListenAndServe(addr, router); err != nil {
+				log.Printf("Server error: %v", err)
+			}
+		}()
 
-	// Wait a moment for server to start
-	time.Sleep(2 * time.Second)
-	log.Println("Server is ready and listening")
+		// Wait a moment for server to start
+		time.Sleep(2 * time.Second)
+		log.Println("Server is ready and listening")
+	}
 
 	// Automatically start C2 listener profiles from config
 	log.Println("🔒 Starting C2 listener profiles from configuration...")
@@ -302,6 +340,9 @@ func main() {
 	log.Printf("✅ Successfully started %d C2 listener(s)", startedCount)
 	log.Printf("🔒 MuliC2 server is now ready with TLS encryption")
 
+	// Start background agent status monitoring
+	go monitorAgentStatus(db)
+
 	// Wait for shutdown signal
 	<-sigChan
 	log.Println("Shutting down server...")
@@ -312,6 +353,34 @@ func main() {
 	}
 
 	log.Println("Server stopped")
+}
+
+// monitorAgentStatus runs in the background to mark agents as offline if they haven't been seen recently
+func monitorAgentStatus(db *sql.DB) {
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Mark agents as offline if they haven't been seen in the last 2 minutes
+			result, err := db.Exec(`
+				UPDATE agents 
+				SET status = 'offline' 
+				WHERE status = 'online' 
+				AND last_seen < NOW() - INTERVAL '2 minutes'
+			`)
+			if err != nil {
+				log.Printf("Error monitoring agent status: %v", err)
+				continue
+			}
+
+			rowsAffected, _ := result.RowsAffected()
+			if rowsAffected > 0 {
+				log.Printf("🔄 Marked %d agents as offline due to inactivity", rowsAffected)
+			}
+		}
+	}
 }
 
 func connectDB() (*sql.DB, error) {
@@ -341,11 +410,45 @@ func connectDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
+	// Initialize default profiles from config
+	if err := initializeProfiles(db, config); err != nil {
+		return nil, fmt.Errorf("failed to initialize profiles: %w", err)
+	}
+
 	// Set connection pool settings
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(25)
 
 	return db, nil
+}
+
+func initializeProfiles(db *sql.DB, config *Config) error {
+	// Check if profiles table has any data
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM profiles").Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check profiles count: %w", err)
+	}
+
+	// If profiles exist, don't initialize
+	if count > 0 {
+		return nil
+	}
+
+	// Insert default profiles from config
+	for _, profile := range config.Profiles {
+		_, err := db.Exec(`
+			INSERT INTO profiles (id, name, project_name, host, port, description, use_tls, cert_file, key_file, poll_interval)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (id) DO NOTHING
+		`, profile.ID, profile.Name, profile.ProjectName, profile.Host, profile.Port, profile.Description, profile.UseTLS, profile.CertFile, profile.KeyFile, 5)
+		if err != nil {
+			log.Printf("Warning: Failed to insert profile %s: %v", profile.ID, err)
+		}
+	}
+
+	log.Printf("✅ Initialized %d default profiles in database", len(config.Profiles))
+	return nil
 }
 
 func createTables(db *sql.DB) error {
@@ -364,6 +467,75 @@ func createTables(db *sql.DB) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create users table: %w", err)
+	}
+
+	// Agents table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS agents (
+			id SERIAL PRIMARY KEY,
+			hostname VARCHAR(255),
+			username VARCHAR(255),
+			ip VARCHAR(64),
+			os VARCHAR(128),
+			arch VARCHAR(64),
+			profile_id VARCHAR(128),
+			status VARCHAR(32) DEFAULT 'online',
+			first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create agents table: %w", err)
+	}
+
+	// Tasks table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tasks (
+			id SERIAL PRIMARY KEY,
+			agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			command TEXT NOT NULL,
+			status VARCHAR(32) DEFAULT 'pending',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			started_at TIMESTAMP,
+			completed_at TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create tasks table: %w", err)
+	}
+
+	// Results table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS results (
+			task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+			output TEXT,
+			completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create results table: %w", err)
+	}
+
+	// Profiles table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS profiles (
+			id VARCHAR(128) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			project_name VARCHAR(255),
+			host VARCHAR(64) DEFAULT '0.0.0.0',
+			port INTEGER NOT NULL,
+			description TEXT,
+			use_tls BOOLEAN DEFAULT true,
+			cert_file VARCHAR(512),
+			key_file VARCHAR(512),
+			poll_interval INTEGER DEFAULT 5,
+			is_active BOOLEAN DEFAULT true,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create profiles table: %w", err)
 	}
 
 	// Create user_settings table with PostgreSQL syntax

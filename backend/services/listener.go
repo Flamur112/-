@@ -1,12 +1,14 @@
 package services
 
 import (
+	"bufio" // Added for httpConn
 	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
-	"os" // Added for os.Stat
+	"net/http" // Added for http.Handler
+	"os"       // Added for os.Stat
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +33,7 @@ type ListenerService struct {
 	listeners map[string]*listenerInstance // Map of profile ID to listener instance
 	ctx       context.Context
 	cancel    context.CancelFunc
+	router    http.Handler // HTTP router for unified API mode
 }
 
 // listenerInstance represents a single listener instance
@@ -50,6 +53,13 @@ func NewListenerService() *ListenerService {
 		ctx:       ctx,
 		cancel:    cancel,
 	}
+}
+
+// SetRouter sets the HTTP router for unified API mode
+func (ls *ListenerService) SetRouter(router http.Handler) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	ls.router = router
 }
 
 // createTLSConfig creates TLS configuration with TLS 1.3 support
@@ -364,6 +374,37 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 		log.Printf("🔌 New TCP connection from %s", remoteAddr)
 	}
 
+	// Check if this is an HTTP request (for unified API mode)
+	if ls.router != nil {
+		// Create a buffered reader to peek at the request
+		reader := bufio.NewReader(conn)
+		peek, err := reader.Peek(8) // Peek more bytes to better detect HTTP
+		if err == nil {
+			// Check if it looks like an HTTP request (more comprehensive check)
+			peekStr := string(peek)
+			if strings.HasPrefix(peekStr, "GET ") ||
+				strings.HasPrefix(peekStr, "POST") ||
+				strings.HasPrefix(peekStr, "PUT ") ||
+				strings.HasPrefix(peekStr, "DELETE") ||
+				strings.HasPrefix(peekStr, "HEAD") ||
+				strings.HasPrefix(peekStr, "OPTIONS") ||
+				strings.HasPrefix(peekStr, "PATCH") {
+
+				log.Printf("🌐 HTTP request detected from %s, routing to API", remoteAddr)
+
+				// Create a custom net.Conn that wraps the buffered reader
+				httpConn := &httpConn{
+					Conn:   conn,
+					reader: reader,
+				}
+
+				// Handle HTTP request directly
+				ls.handleHTTPRequest(httpConn)
+				return
+			}
+		}
+	}
+
 	// Send welcome message with connection details
 	profileName := "unknown"
 	if instance.profile != nil {
@@ -419,6 +460,85 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 			conn.Write([]byte(response))
 		}
 	}
+}
+
+// httpConn wraps a net.Conn with a buffered reader for HTTP requests
+type httpConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *httpConn) Read(p []byte) (n int, err error) {
+	return c.reader.Read(p)
+}
+
+// handleHTTPRequest handles HTTP requests in unified mode
+func (ls *ListenerService) handleHTTPRequest(conn *httpConn) {
+	defer conn.Close()
+
+	// Create a response writer
+	responseWriter := &httpResponseWriter{
+		conn:       conn,
+		header:     make(http.Header),
+		statusCode: 200,
+	}
+
+	// Create a request
+	req, err := http.ReadRequest(conn.reader)
+	if err != nil {
+		log.Printf("Error reading HTTP request: %v", err)
+		return
+	}
+	defer req.Body.Close()
+
+	// Serve the request
+	ls.router.ServeHTTP(responseWriter, req)
+}
+
+// httpResponseWriter implements http.ResponseWriter for our custom connection
+type httpResponseWriter struct {
+	conn        *httpConn
+	header      http.Header
+	statusCode  int
+	wroteHeader bool
+}
+
+func (w *httpResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *httpResponseWriter) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.conn.Write(data)
+}
+
+func (w *httpResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.statusCode = statusCode
+	w.wroteHeader = true
+
+	// Write status line
+	statusText := http.StatusText(statusCode)
+	if statusText == "" {
+		statusText = "Unknown"
+	}
+	statusLine := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText)
+	w.conn.Write([]byte(statusLine))
+
+	// Write headers
+	for key, values := range w.header {
+		for _, value := range values {
+			headerLine := fmt.Sprintf("%s: %s\r\n", key, value)
+			w.conn.Write([]byte(headerLine))
+		}
+	}
+
+	// End headers
+	w.conn.Write([]byte("\r\n"))
 }
 
 // trimCommand removes common command terminators

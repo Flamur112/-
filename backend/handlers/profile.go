@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -32,6 +33,9 @@ func (h *ProfileHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/profile/start", h.StartListener).Methods("POST")
 	router.HandleFunc("/profile/stop", h.StopListener).Methods("POST")
 	router.HandleFunc("/profile/status", h.GetStatus).Methods("GET")
+	router.HandleFunc("/profile/list", h.ListProfiles).Methods("GET")
+	router.HandleFunc("/profile/create", h.CreateProfile).Methods("POST")
+	router.HandleFunc("/profile/get", h.GetProfile).Methods("GET")
 }
 
 // StartListenerRequest represents the request to start a listener
@@ -165,4 +169,155 @@ func (h *ProfileHandler) StopListener(w http.ResponseWriter, r *http.Request) {
 		"message":   "Listener stopped successfully",
 		"profileId": req.ProfileID,
 	})
+}
+
+// Profile management endpoints
+func (h *ProfileHandler) ListProfiles(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query(`
+		SELECT id, name, project_name, host, port, description, use_tls, cert_file, key_file, poll_interval, is_active, created_at, updated_at
+		FROM profiles
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		log.Printf("List profiles error: %v", err)
+		http.Error(w, "Failed to list profiles", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var profiles []map[string]interface{}
+	for rows.Next() {
+		var profile map[string]interface{}
+		var id, name, projectName, host, description, certFile, keyFile string
+		var port, pollInterval int
+		var useTLS, isActive bool
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(&id, &name, &projectName, &host, &port, &description, &useTLS, &certFile, &keyFile, &pollInterval, &isActive, &createdAt, &updatedAt)
+		if err != nil {
+			log.Printf("Scan profile error: %v", err)
+			continue
+		}
+
+		profile = map[string]interface{}{
+			"id":           id,
+			"name":         name,
+			"projectName":  projectName,
+			"host":         host,
+			"port":         port,
+			"description":  description,
+			"useTLS":       useTLS,
+			"certFile":     certFile,
+			"keyFile":      keyFile,
+			"pollInterval": pollInterval,
+			"isActive":     isActive,
+			"createdAt":    createdAt,
+			"updatedAt":    updatedAt,
+		}
+		profiles = append(profiles, profile)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"profiles": profiles,
+	})
+}
+
+type CreateProfileRequest struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	ProjectName  string `json:"projectName"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Description  string `json:"description"`
+	UseTLS       bool   `json:"useTLS"`
+	CertFile     string `json:"certFile"`
+	KeyFile      string `json:"keyFile"`
+	PollInterval int    `json:"pollInterval"`
+}
+
+func (h *ProfileHandler) CreateProfile(w http.ResponseWriter, r *http.Request) {
+	var req CreateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate required fields
+	if req.ID == "" || req.Name == "" || req.Port <= 0 {
+		http.Error(w, "ID, name, and port are required", http.StatusBadRequest)
+		return
+	}
+
+	// Set defaults
+	if req.Host == "" {
+		req.Host = "0.0.0.0"
+	}
+	if req.PollInterval <= 0 {
+		req.PollInterval = 5
+	}
+
+	_, err := h.db.Exec(`
+		INSERT INTO profiles (id, name, project_name, host, port, description, use_tls, cert_file, key_file, poll_interval)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, req.ID, req.Name, req.ProjectName, req.Host, req.Port, req.Description, req.UseTLS, req.CertFile, req.KeyFile, req.PollInterval)
+	if err != nil {
+		log.Printf("Create profile error: %v", err)
+		http.Error(w, "Failed to create profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "success",
+		"message":   "Profile created successfully",
+		"profileId": req.ID,
+	})
+}
+
+func (h *ProfileHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	profileID := r.URL.Query().Get("id")
+	if profileID == "" {
+		http.Error(w, "Profile ID required", http.StatusBadRequest)
+		return
+	}
+
+	var profile map[string]interface{}
+	var id, name, projectName, host, description, certFile, keyFile string
+	var port, pollInterval int
+	var useTLS, isActive bool
+	var createdAt, updatedAt time.Time
+
+	err := h.db.QueryRow(`
+		SELECT id, name, project_name, host, port, description, use_tls, cert_file, key_file, poll_interval, is_active, created_at, updated_at
+		FROM profiles WHERE id = $1
+	`, profileID).Scan(&id, &name, &projectName, &host, &port, &description, &useTLS, &certFile, &keyFile, &pollInterval, &isActive, &createdAt, &updatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Profile not found", http.StatusNotFound)
+		} else {
+			log.Printf("Get profile error: %v", err)
+			http.Error(w, "Failed to get profile", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	profile = map[string]interface{}{
+		"id":           id,
+		"name":         name,
+		"projectName":  projectName,
+		"host":         host,
+		"port":         port,
+		"description":  description,
+		"useTLS":       useTLS,
+		"certFile":     certFile,
+		"keyFile":      keyFile,
+		"pollInterval": pollInterval,
+		"isActive":     isActive,
+		"createdAt":    createdAt,
+		"updatedAt":    updatedAt,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(profile)
 }
