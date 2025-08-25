@@ -428,6 +428,38 @@ if [ ! -f "mulic2" ]; then
     fi
 fi
 
+# On Linux: allow binding to privileged ports (e.g., 443) without running as root
+NEEDS_PRIV_PORT=0
+if command -v jq >/dev/null 2>&1; then
+    if jq -e '.profiles | any(.port != null and .port < 1024)' ../backend/config.json >/dev/null 2>&1; then
+        NEEDS_PRIV_PORT=1
+    fi
+else
+    # Fallback: grep for common privileged port 443
+    if grep -q '"port"\s*:\s*443' ../backend/config.json 2>/dev/null; then
+        NEEDS_PRIV_PORT=1
+    fi
+fi
+if [ "$NEEDS_PRIV_PORT" = "1" ]; then
+    echo "🔐 Detected listener on privileged port (<1024). Preparing binary for port 443 binding..."
+    if command -v setcap >/dev/null 2>&1; then
+        sudo setcap 'cap_net_bind_service=+ep' ./mulic2 || true
+        echo "   - Applied setcap to allow binding 443 without root"
+    else
+        echo "   - setcap not found. Install: sudo apt-get install -y libcap2-bin"
+        echo "   - Or run backend with sudo to bind port 443"
+    fi
+    # Check if 443 is already in use
+    if command -v ss >/dev/null 2>&1; then
+        if ss -ltn '( sport = :443 )' | grep -q ':443'; then
+            echo "🛑 Port 443 is in use. Free it first. Examples:"
+            echo "   sudo ss -ltnp | grep :443"
+            echo "   sudo systemctl stop nginx apache2"
+            echo "   sudo kill -9 <pid_using_443>"
+        fi
+    fi
+fi
+
 # Start backend in background
 ./mulic2 &
 BACKEND_PID=$!
