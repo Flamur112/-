@@ -105,9 +105,13 @@ if command -v pg_lsclusters &> /dev/null; then
     CI=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
     if [ -n "$CI" ]; then
         # Expected columns: Ver Cluster Port Status Owner Data directory Log file
-        read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CI"
+        read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT CLUSTER_STATUS _ CLUSTER_DATADIR _ <<< "$CI"
         if [ -n "$CLUSTER_PORT" ]; then
             PSQL_FLAGS="-p $CLUSTER_PORT"
+        fi
+        # Prefer unix socket on Debian/Kali
+        if [ -d "/var/run/postgresql" ]; then
+            PSQL_FLAGS="$PSQL_FLAGS -h /var/run/postgresql"
         fi
     fi
 fi
@@ -165,10 +169,11 @@ else
         # Find existing cluster
         CLUSTER_INFO=$(pg_lsclusters 2>/dev/null | grep -v "Ver" | head -1)
         if [ -n "$CLUSTER_INFO" ]; then
-            # Re-detect with port
-            read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CLUSTER_INFO"
-            echo "Found cluster: $CLUSTER_VERSION $CLUSTER_NAME ${CLUSTER_PORT:-}"
+            # Re-detect with port and data dir
+            read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT CLUSTER_STATUS _ CLUSTER_DATADIR _ <<< "$CLUSTER_INFO"
+            echo "Found cluster: $CLUSTER_VERSION $CLUSTER_NAME ${CLUSTER_PORT:-} ${CLUSTER_STATUS:-}"
             if [ -n "$CLUSTER_PORT" ]; then PSQL_FLAGS="-p $CLUSTER_PORT"; fi
+            if [ -d "/var/run/postgresql" ]; then PSQL_FLAGS="$PSQL_FLAGS -h /var/run/postgresql"; fi
             
             # Stop PostgreSQL first
             sudo systemctl stop postgresql &> /dev/null
@@ -184,8 +189,9 @@ else
                 sleep 2
                 CI2=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
                 if [ -n "$CI2" ]; then
-                    read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT _ <<< "$CI2"
+                    read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT CLUSTER_STATUS _ CLUSTER_DATADIR _ <<< "$CI2"
                     if [ -n "$CLUSTER_PORT" ]; then PSQL_FLAGS="-p $CLUSTER_PORT"; fi
+                    if [ -d "/var/run/postgresql" ]; then PSQL_FLAGS="$PSQL_FLAGS -h /var/run/postgresql"; fi
                 fi
             else
                 echo "pg_dropcluster/pg_createcluster not found, trying alternative..."
@@ -229,6 +235,21 @@ else
     if [ -n "$CLUSTER_VERSION" ] && [ -n "$CLUSTER_NAME" ] && command -v pg_ctlcluster &> /dev/null; then
         sudo pg_ctlcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" start || true
         sleep 2
+        # If data dir missing, force recreate
+        if [ -n "$CLUSTER_DATADIR" ] && [ ! -d "$CLUSTER_DATADIR" ]; then
+            if command -v pg_dropcluster &> /dev/null && command -v pg_createcluster &> /dev/null; then
+                sudo pg_dropcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" --stop &> /dev/null || true
+                sudo pg_createcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" &> /dev/null
+                sudo pg_ctlcluster "$CLUSTER_VERSION" "$CLUSTER_NAME" start || true
+                sleep 2
+                CI3=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
+                if [ -n "$CI3" ]; then
+                    read -r CLUSTER_VERSION CLUSTER_NAME CLUSTER_PORT CLUSTER_STATUS _ CLUSTER_DATADIR _ <<< "$CI3"
+                    if [ -n "$CLUSTER_PORT" ]; then PSQL_FLAGS="-p $CLUSTER_PORT"; fi
+                    if [ -d "/var/run/postgresql" ]; then PSQL_FLAGS="$PSQL_FLAGS -h /var/run/postgresql"; fi
+                fi
+            fi
+        fi
     fi
     
     # Setup user again
