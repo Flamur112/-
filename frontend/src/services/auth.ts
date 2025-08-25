@@ -27,7 +27,7 @@ export interface AuthResponse {
 }
 
 class AuthService {
-  private token = ref<string | null>(localStorage.getItem('auth_token'))
+  private token = ref<string | null>(null) // Don't auto-load from localStorage
   private user = ref<User | null>(null)
   private backendAvailable = ref(true) // Global flag to track backend availability
 
@@ -37,10 +37,9 @@ class AuthService {
   public userRole = computed(() => this.user.value?.role || '')
 
   constructor() {
-    // Try to restore user from token on service initialization
-    if (this.token.value) {
-      this.loadUserProfile()
-    }
+    // Don't auto-restore user from token - require fresh login each time
+    // This ensures security by requiring explicit authentication on each server start
+    this.clearAuth() // Clear any existing tokens on service initialization
   }
 
   // Set authentication token and user
@@ -52,7 +51,7 @@ class AuthService {
   }
 
   // Clear authentication data
-  private clearAuth() {
+  public clearAuth() {
     this.token.value = null
     this.user.value = null
     localStorage.removeItem('auth_token')
