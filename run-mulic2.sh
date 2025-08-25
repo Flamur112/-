@@ -508,16 +508,10 @@ echo "📱 Frontend: http://localhost:5173"
 echo "🔧 Backend API: http://localhost:8080"
 echo "🎯 C2 Listener: Port 8443 (TLS encrypted)"
 echo
-echo "💡 Services are running in background"
+echo "💡 Logs will stream below. Press Ctrl+C to stop both services."
 echo "💡 Backend PID: $BACKEND_PID"
 echo "💡 Frontend PID: $FRONTEND_PID"
-echo "💡 To stop: kill $BACKEND_PID $FRONTEND_PID"
 echo "========================================"
 echo
-echo "Launcher script completed. Services are running in background."
-echo
-echo "To stop all services:"
-echo "kill $BACKEND_PID $FRONTEND_PID"
-echo
-echo "This window will close automatically in 10 seconds..."
-sleep 10
+# Keep this terminal attached to both processes
+wait $BACKEND_PID $FRONTEND_PID

@@ -19,25 +19,12 @@ git clone <repository-url>
 cd MuliC2
 ```
 
-### 2. Generate TLS Certificates (REQUIRED)
-```powershell
-# Generate self-signed certificates for testing
-.\generate-certs.ps1
-
-# This creates:
-# - ./certs/server.crt (certificate)
-# - ./certs/server.key (private key)
-```
-
-**⚠️ The server will NOT start without these certificates!**
+### 2. TLS Certificates (REQUIRED)
+Provide `server.crt` and `server.key` at the repo root. The server will refuse to start without them.
+You may create them yourself with OpenSSL or your PKI.
 
 ### 3. Database Setup
-```bash
-# Create PostgreSQL database
-psql -U postgres
-CREATE DATABASE mulic2_db;
-\q
-```
+No manual steps needed. The launcher script configures PostgreSQL, sets a password, and creates the database if missing.
 
 ### 4. One-Command Setup (Recommended)
 ```bash
@@ -50,9 +37,10 @@ chmod +x run-mulic2.sh
 ```
 
 **This single script will:**
-- Start both backend and frontend servers
-- Open the application in your browser
-- Everything ready to use!
+- Start PostgreSQL if required and fix common Linux issues
+- Ensure DB user/password match config
+- Validate TLS certs
+- Start backend and frontend
 
 ### 5. Access Your C2 Platform
 - **Frontend**: http://localhost:5173
@@ -60,25 +48,14 @@ chmod +x run-mulic2.sh
 - **No default credentials** - You must register first!
 
 ### 6. Automatic Setup
-The launcher scripts now automatically:
-- ✅ Detect PostgreSQL installation automatically
-- ✅ Ask for pg_ctl.exe path if not found
-- ✅ Start PostgreSQL if not running
-- ✅ Create the `mulic2_db` database if it doesn't exist
-- ✅ Verify database connection before starting services
-- ✅ **TLS certificate validation** (server won't start without them)
+The launcher scripts automatically:
+- ✅ Start PostgreSQL (Linux) and fix peer/md5 auth
+- ✅ Create `mulic2_db` if needed
+- ✅ Apply DB password to match backend config
+- ✅ Validate TLS (server won’t start without certs)
 
-### 7. Cleanup (When Done)
-```bash
-# Windows
-cleanup-postgres.bat
-
-# Linux/Mac
-chmod +x cleanup-postgres.sh
-./cleanup-postgres.sh
-```
-
-**This will clean up any leftover PostgreSQL, Go, or Node.js processes.**
+### 7. SPA
+The frontend is a Single Page Application (SPA). Use the UI to create/start listener profiles. Errors appear in the page and in the terminal.
 
 ## 📁 Project Structure
 
@@ -95,12 +72,10 @@ MuliC2/
 │   ├── src/           # Source code
 │   ├── public/        # Static assets
 │   └── config.json    # Frontend configuration
-├── certs/             # TLS certificates (created by generate-certs.ps1)
-│   ├── server.crt     # Server certificate
-│   └── server.key     # Private key
+├── server.crt         # TLS certificate (provide yourself)
+├── server.key         # TLS private key (provide yourself)
 ├── here.ps1           # Core PowerShell reverse shell functions
-├── generate-shell.ps1 # PowerShell payload generator
-├── generate-certs.ps1 # TLS certificate generator
+├── here.ps1           # Polymorphic PowerShell reverse shell generator
 ├── run-mulic2.bat     # Windows launcher script
 ├── run-mulic2.sh      # Linux/macOS launcher script
 ├── cleanup-postgres.bat # Windows cleanup script
@@ -130,16 +105,7 @@ MuliC2/
 ## 🎯 PowerShell Reverse Shell
 
 ### Generate Encrypted Payloads
-```powershell
-# Generate reverse shell for your C2 server
-.\generate-shell.ps1 -LHOST "YOUR_SERVER_IP" -LPORT YOUR_SERVER_PORT
-
-# Generate with obfuscation
-.\generate-shell.ps1 -LHOST "192.168.1.100" -LPORT 443 -Obfuscate
-
-# Custom output filename
-.\generate-shell.ps1 -LHOST "10.0.0.50" -LPORT 8080 -OutputFile "my-shell.ps1"
-```
+Use `here.ps1` directly. It generates a TLS 1.3/1.2 reverse shell, obfuscated and wrapped for execution.
 
 ### Features
 - **TLS 1.3/1.2 Support** - Modern encryption with automatic fallback
@@ -269,16 +235,14 @@ npm install
 ## 📝 Configuration
 
 ### Port Configuration
-Edit `backend/config.json` and `frontend/config.json` to change ports:
-- **API Port**: Default 8080 (web interface)
-- **C2 Port**: Default 8081 (agent connections)
-- **Frontend Port**: Default 5173 (Vue.js dev server)
+Edit `backend/config.json` profiles to set listener host/port.
+- To use 443 on Linux without root, the launcher applies `setcap cap_net_bind_service=+ep` to the backend binary.
+- If 443 is in use, free it (nginx/apache) or select another port.
 
 ### Database Configuration
-- **Host**: `localhost` (default)
-- **Port**: `5432` (default)
-- **Database**: `mulic2_db`
-- **User**: `postgres` (default)
+Set in `backend/config.json` under `database`.
+- To change the password, either edit the file then re-run the launcher, or run:
+  `sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD 'NEW_PASSWORD';"`
 
 ## 📄 License
 
