@@ -132,6 +132,41 @@ if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
     fi
 fi
 
+# Force md5 auth on Debian/Kali clusters to avoid peer failures
+PG_HBA=""
+if command -v pg_lsclusters &> /dev/null; then
+    CI=$(pg_lsclusters 2>/dev/null | awk 'NR==2{print}')
+    if [ -n "$CI" ]; then
+        read -r _CV _CN _CP _ST _OW _DD _LG <<< "$CI"
+        if [ -n "$_CV" ] && [ -n "$_CN" ]; then
+            CAND="/etc/postgresql/$_CV/$_CN/pg_hba.conf"
+            if [ -f "$CAND" ]; then PG_HBA="$CAND"; fi
+        fi
+    fi
+fi
+if [ -z "$PG_HBA" ]; then
+    # Fallback glob
+    PG_HBA=$(ls /etc/postgresql/*/*/pg_hba.conf 2>/dev/null | head -1)
+fi
+if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
+    echo "🔧 Enforcing md5 auth in $PG_HBA"
+    sudo sed -i 's/^\s*local\s\+all\s\+all\s\+peer/\tlocal\tall\tall\tmd5/i' "$PG_HBA"
+    sudo sed -i 's/^\s*local\s\+all\s\+postgres\s\+peer/\tlocal\tall\tpostgres\tmd5/i' "$PG_HBA"
+    # Ensure a md5 line exists for local
+    if ! grep -Eq '^\s*local\s+all\s+all\s+md5' "$PG_HBA"; then
+        echo -e "local\tall\tall\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+    fi
+    # Ensure a host line exists for localhost
+    if ! grep -Eq '^\s*host\s+all\s+all\s+127\.0\.0\.1/32\s+md5' "$PG_HBA"; then
+        echo -e "host\tall\tall\t127.0.0.1/32\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+    fi
+    if ! grep -Eq '^\s*host\s+all\s+all\s+::1/128\s+md5' "$PG_HBA"; then
+        echo -e "host\tall\tall\t::1/128\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+    fi
+    sudo systemctl restart postgresql || true
+    sleep 2
+fi
+
 # Auto-fix PostgreSQL issues
 echo "🔧 Auto-fixing PostgreSQL setup..."
 
