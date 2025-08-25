@@ -107,9 +107,30 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 		return fmt.Errorf("profile cannot be nil")
 	}
 
-	// Check if this specific profile is already active
-	if existing, exists := ls.listeners[profile.ID]; exists && existing.active {
-		return fmt.Errorf("listener for profile '%s' (ID: %s) is already active", profile.Name, profile.ID)
+	// Generate unique profile ID if there are conflicts
+	originalID := profile.ID
+	uniqueID := profile.ID
+	counter := 1
+
+	for {
+		if existing, exists := ls.listeners[uniqueID]; exists && existing.active {
+			// Generate new unique ID
+			uniqueID = fmt.Sprintf("%s_%d", originalID, counter)
+			counter++
+
+			// Prevent infinite loop (safety check)
+			if counter > 1000 {
+				return fmt.Errorf("could not generate unique profile ID after 1000 attempts")
+			}
+		} else {
+			break
+		}
+	}
+
+	// Update profile with unique ID
+	if uniqueID != originalID {
+		log.Printf("⚠️  Profile ID conflict detected. Generated unique ID: %s -> %s", originalID, uniqueID)
+		profile.ID = uniqueID
 	}
 
 	// Check if port is privileged (requires root or setcap)

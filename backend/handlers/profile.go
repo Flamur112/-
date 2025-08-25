@@ -116,7 +116,12 @@ func (h *ProfileHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-// StopListener stops the current C2 listener
+// StopListenerRequest represents a request to stop a specific listener
+type StopListenerRequest struct {
+	ProfileID string `json:"profileId"`
+}
+
+// StopListener stops a specific C2 listener by profile ID
 func (h *ProfileHandler) StopListener(w http.ResponseWriter, r *http.Request) {
 	// Add panic recovery
 	defer func() {
@@ -132,7 +137,20 @@ func (h *ProfileHandler) StopListener(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.listenerService.StopListener()
+	// Parse request body
+	var req StopListenerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate profile ID
+	if req.ProfileID == "" {
+		http.Error(w, "Profile ID is required", http.StatusBadRequest)
+		return
+	}
+
+	err := h.listenerService.StopListener(req.ProfileID)
 	if err != nil {
 		log.Printf("Error stopping listener: %v", err)
 		http.Error(w, "Failed to stop listener: "+err.Error(), http.StatusInternalServerError)
@@ -143,7 +161,8 @@ func (h *ProfileHandler) StopListener(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "Listener stopped successfully",
+		"success":   true,
+		"message":   "Listener stopped successfully",
+		"profileId": req.ProfileID,
 	})
 }
