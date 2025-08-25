@@ -153,10 +153,18 @@ if echo "$DB_PASS" | grep -q ':'; then
 fi
 if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
 if [ -z "$DB_PASS" ]; then DB_PASS="postgres"; fi
-echo "🔐 Backend database credentials from backend/config.json"
+echo "🔐 Database credentials to apply (defaults are user=postgres, password=postgres)"
 echo "   - user: $DB_USER"
 echo "   - password: (hidden)"
-echo "   - To change: edit backend/config.json and re-run this script"
+echo "   - To change credentials:"
+echo "     1) Edit backend/config.json → database.user / database.password"
+echo "     2) Re-run: ./run-mulic2.sh"
+echo "   - Or change immediately via PostgreSQL:"
+echo "     sudo -u postgres psql -h /var/run/postgresql -d postgres -c \"ALTER USER $DB_USER PASSWORD 'NEW_PASSWORD';\""
+echo "   - To use a new DB user instead:"
+echo "     sudo -u postgres psql -h /var/run/postgresql -d postgres -c \"CREATE USER myuser WITH PASSWORD 'mypassword';\""
+echo "     sudo -u postgres psql -h /var/run/postgresql -d postgres -c \"ALTER DATABASE mulic2_db OWNER TO myuser;\""
+echo "     Then update backend/config.json to match and re-run"
 
 # Force md5 auth on Debian/Kali clusters to avoid peer failures
 PG_HBA=""
@@ -439,9 +447,10 @@ fi
 
 echo "🌐 Starting Frontend..."
 cd ../frontend
+echo "📂 Frontend working directory: $(pwd)"
 if [ ! -d node_modules ]; then
-    echo "📦 Installing frontend dependencies (npm install)..."
-    npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1 || true
+    echo "📦 Installing frontend dependencies (this may take a few minutes)..."
+    npm ci || npm install || true
 fi
 
 # Start vite, fallback to npx vite if script not found
