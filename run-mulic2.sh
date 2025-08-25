@@ -453,9 +453,9 @@ if [ ! -d node_modules ]; then
     npm ci || npm install || true
 fi
 
+echo "🚀 Starting Vite dev server (frontend)..."
 # Start vite, fallback to npx vite if script not found
-if npm run -s dev >/dev/null 2>&1; then
-    npm run dev &
+if npm run dev & then
     FRONTEND_PID=$!
 else
     if command -v npx >/dev/null 2>&1; then
