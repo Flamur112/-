@@ -136,8 +136,21 @@ if [ -f "/etc/postgresql/*/main/pg_hba.conf" ]; then
 fi
 
 # Read backend DB credentials from config so the backend and DB match
-DB_USER=$(grep -o '"user"\s*:\s*"[^"]*"' backend/config.json | sed 's/.*:"\([^"]*\)"/\1/' | head -1)
-DB_PASS=$(grep -o '"password"\s*:\s*"[^"]*"' backend/config.json | sed 's/.*:"\([^"]*\)"/\1/' | head -1)
+if command -v jq >/dev/null 2>&1; then
+    DB_USER=$(jq -r '.database.user' backend/config.json 2>/dev/null)
+    DB_PASS=$(jq -r '.database.password' backend/config.json 2>/dev/null)
+else
+    # Fallback parser (awk) if jq is unavailable
+    DB_USER=$(awk -F '"' '/"user"\s*:/ {print $4; exit}' backend/config.json 2>/dev/null)
+    DB_PASS=$(awk -F '"' '/"password"\s*:/ {print $4; exit}' backend/config.json 2>/dev/null)
+fi
+# Fallback sanitization if parsing looked wrong
+if echo "$DB_USER" | grep -q ':'; then
+    DB_USER=$(echo "$DB_USER" | sed -E 's/.*"([^"]+)".*/\1/')
+fi
+if echo "$DB_PASS" | grep -q ':'; then
+    DB_PASS=$(echo "$DB_PASS" | sed -E 's/.*"([^"]+)".*/\1/')
+fi
 if [ -z "$DB_USER" ]; then DB_USER="postgres"; fi
 if [ -z "$DB_PASS" ]; then DB_PASS="postgres"; fi
 echo "🔐 Backend database credentials from backend/config.json"
@@ -165,15 +178,37 @@ if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
     echo "🔧 Adjusting authentication in: $PG_HBA"
     echo "   - Temporarily enabling 'trust' for local 'postgres' to set a password non-interactively"
     echo "   - Then enforcing 'md5' (password-based) auth for all local/host connections"
+
+    # Function to enforce md5 mode lines
+    enforce_md5() {
+        # Remove any previous trust line for postgres
+        sudo sed -i '/^\s*local\s\+all\s\+postgres\s\+trust/d' "$PG_HBA"
+        # Ensure md5 lines
+        if grep -Eq '^\s*local\s+all\s+all\s+peer' "$PG_HBA"; then
+            sudo sed -i 's/^\s*local\s\+all\s\+all\s\+peer/\tlocal\tall\tall\tmd5/' "$PG_HBA"
+        fi
+        if grep -Eq '^\s*local\s+all\s+postgres\s+peer' "$PG_HBA"; then
+            sudo sed -i 's/^\s*local\s\+all\s\+postgres\s\+peer/\tlocal\tall\tpostgres\tmd5/' "$PG_HBA"
+        fi
+        if ! grep -Eq '^\s*local\s+all\s+all\s+md5' "$PG_HBA"; then
+            echo -e "local\tall\tall\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+        fi
+        if ! grep -Eq '^\s*host\s+all\s+all\s+127\.0\.0\.1/32\s+md5' "$PG_HBA"; then
+            echo -e "host\tall\tall\t127.0.0.1/32\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+        fi
+        if ! grep -Eq '^\s*host\s+all\s+all\s+::1/128\s+md5' "$PG_HBA"; then
+            echo -e "host\tall\tall\t::1/128\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
+        fi
+    }
+
     # 1) Temporarily allow trust for postgres to set password non-interactively
     if ! grep -Eq '^\s*local\s+all\s+postgres\s+trust' "$PG_HBA"; then
-        # Prepend a trust line for postgres
         echo -e "local\tall\tpostgres\ttrust\n$(cat $PG_HBA)" | sudo tee "$PG_HBA" >/dev/null
     fi
     sudo systemctl restart postgresql || true
     sleep 2
 
-    # Set password without prompt now that trust is allowed
+    # Set password now that trust is allowed (guaranteed non-interactive)
     echo "🔒 Ensuring DB superuser password matches backend/config.json"
     echo "   - Setting user 'postgres' password to configured value"
     sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD '$DB_PASS';" >/dev/null 2>&1 || true
@@ -181,26 +216,25 @@ if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
 
     # 2) Enforce md5 for everyone including postgres
     echo "✅ Enforcing md5 (password) authentication in $PG_HBA"
-    # Remove any previous trust line for postgres
-    sudo sed -i '/^\s*local\s\+all\s\+postgres\s\+trust/d' "$PG_HBA"
-    # Ensure md5 lines
-    if grep -Eq '^\s*local\s+all\s+all\s+peer' "$PG_HBA"; then
-        sudo sed -i 's/^\s*local\s\+all\s\+all\s\+peer/\tlocal\tall\tall\tmd5/' "$PG_HBA"
-    fi
-    if grep -Eq '^\s*local\s+all\s+postgres\s+peer' "$PG_HBA"; then
-        sudo sed -i 's/^\s*local\s\+all\s\+postgres\s\+peer/\tlocal\tall\tpostgres\tmd5/' "$PG_HBA"
-    fi
-    if ! grep -Eq '^\s*local\s+all\s+all\s+md5' "$PG_HBA"; then
-        echo -e "local\tall\tall\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
-    fi
-    if ! grep -Eq '^\s*host\s+all\s+all\s+127\.0\.0\.1/32\s+md5' "$PG_HBA"; then
-        echo -e "host\tall\tall\t127.0.0.1/32\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
-    fi
-    if ! grep -Eq '^\s*host\s+all\s+all\s+::1/128\s+md5' "$PG_HBA"; then
-        echo -e "host\tall\tall\t::1/128\tmd5" | sudo tee -a "$PG_HBA" >/dev/null
-    fi
+    enforce_md5
     sudo systemctl restart postgresql || true
     sleep 2
+
+    # Final verification using password (non-interactive)
+    export PGPASSWORD="$DB_PASS"
+    if ! psql $PSQL_FLAGS -h /var/run/postgresql -U postgres -d postgres -c "SELECT 1;" &> /dev/null; then
+        echo "⚠️  Password test failed once, retrying password set under trust mode"
+        # Re-enable trust, set password again, then md5 again
+        if ! grep -Eq '^\s*local\s+all\s+postgres\s+trust' "$PG_HBA"; then
+            echo -e "local\tall\tpostgres\ttrust\n$(cat $PG_HBA)" | sudo tee "$PG_HBA" >/dev/null
+        fi
+        sudo systemctl restart postgresql || true
+        sleep 2
+        sudo -u postgres psql -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD '$DB_PASS';" >/dev/null 2>&1 || true
+        enforce_md5
+        sudo systemctl restart postgresql || true
+        sleep 2
+    fi
 fi
 
 # Auto-fix PostgreSQL issues
@@ -219,9 +253,8 @@ if [ -n "$CLUSTER_VERSION" ] && [ -n "$CLUSTER_NAME" ] && command -v pg_ctlclust
     sleep 2
 fi
 
-# Fix user permissions (non-interactive)
+# Fix user permissions (non-interactive) – ensure password env is set for subsequent checks
 export PGPASSWORD="$DB_PASS"
-sudo -u postgres psql $PSQL_FLAGS -h /var/run/postgresql -d postgres -c "ALTER USER postgres PASSWORD '$DB_PASS';" &> /dev/null || true
 sudo -u postgres psql $PSQL_FLAGS -h /var/run/postgresql -d postgres -c "ALTER USER postgres CREATEDB;" &> /dev/null || true
 
 # Try connection (use detected port if present)
