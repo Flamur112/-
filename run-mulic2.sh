@@ -139,40 +139,53 @@ else
     # Try to reinitialize if data directory exists
     if [ -d "/var/lib/postgresql" ] && [ "$(ls -A /var/lib/postgresql)" ]; then
         echo "🔄 Reinitializing PostgreSQL to fix collation..."
-        sudo rm -rf /var/lib/postgresql/* &> /dev/null
         
-        # Try different reinit methods
-        if command -v postgresql-setup &> /dev/null; then
-            echo "Using postgresql-setup..."
-            sudo postgresql-setup --initdb &> /dev/null
-        elif command -v pg_ctlcluster &> /dev/null; then
-            echo "Using pg_ctlcluster..."
-            # Find existing clusters
-            CLUSTERS=$(pg_lsclusters | grep -v "Ver" | awk '{print $1 " " $2}' | head -1 2>/dev/null)
-            if [ -n "$CLUSTERS" ]; then
-                read PG_VERSION PG_CLUSTER <<< "$CLUSTERS"
-                echo "Found cluster: $PG_VERSION $PG_CLUSTER"
-                sudo -u postgres initdb -D "/var/lib/postgresql/$PG_VERSION/$PG_CLUSTER" &> /dev/null
+        # Find existing cluster
+        CLUSTER_INFO=$(pg_lsclusters 2>/dev/null | grep -v "Ver" | head -1)
+        if [ -n "$CLUSTER_INFO" ]; then
+            read CLUSTER_VERSION CLUSTER_NAME <<< "$CLUSTER_INFO"
+            echo "Found cluster: $CLUSTER_VERSION $CLUSTER_NAME"
+            
+            # Stop PostgreSQL first
+            sudo systemctl stop postgresql &> /dev/null
+            
+            # Drop and recreate the cluster (Kali Linux method)
+            if command -v pg_dropcluster &> /dev/null && command -v pg_createcluster &> /dev/null; then
+                echo "Using pg_dropcluster/pg_createcluster (Kali Linux method)..."
+                sudo pg_dropcluster $CLUSTER_VERSION $CLUSTER_NAME &> /dev/null
+                sudo pg_createcluster $CLUSTER_VERSION $CLUSTER_NAME &> /dev/null
+                echo "✅ Cluster recreated successfully"
             else
-                echo "No clusters found, trying default locations..."
-                for version in 15 14 13 12; do
-                    if [ -d "/var/lib/postgresql/$version" ]; then
-                        echo "Found data directory: /var/lib/postgresql/$version"
-                        sudo -u postgres initdb -D "/var/lib/postgresql/$version/main" &> /dev/null
-                        break
-                    fi
-                done
+                echo "pg_dropcluster/pg_createcluster not found, trying alternative..."
+                sudo rm -rf /var/lib/postgresql/* &> /dev/null
+                
+                # Try different reinit methods
+                if command -v postgresql-setup &> /dev/null; then
+                    echo "Using postgresql-setup..."
+                    sudo postgresql-setup --initdb &> /dev/null
+                else
+                    echo "❌ No PostgreSQL setup tools found"
+                    echo "💡 Please run: sudo ./fix-kali-postgres.sh"
+                    echo
+                    echo "Press Enter to exit..."
+                    read
+                    exit 1
+                fi
             fi
         else
-            echo "Trying alternative reinit method..."
-            # Try system data directories
-            for version in 15 14 13 12; do
-                if [ -d "/var/lib/postgresql/$version" ]; then
-                    echo "Found system data directory: /var/lib/postgresql/$version"
-                    sudo -u postgres initdb -D "/var/lib/postgresql/$version/main" &> /dev/null
-                    break
-                fi
-            done
+            echo "No clusters found, trying default reinit..."
+            sudo rm -rf /var/lib/postgresql/* &> /dev/null
+            
+            if command -v postgresql-setup &> /dev/null; then
+                sudo postgresql-setup --initdb &> /dev/null
+            else
+                echo "❌ No PostgreSQL setup tools found"
+                echo "💡 Please run: sudo ./fix-kali-postgres.sh"
+                echo
+                echo "Press Enter to exit..."
+                read
+                exit 1
+            fi
         fi
     fi
     
@@ -189,7 +202,8 @@ else
         echo "✅ PostgreSQL fixed and connection successful"
     else
         echo "❌ PostgreSQL still not working"
-        echo "💡 Please run: sudo ./fix-postgres-collation.sh"
+        echo "💡 Please run: sudo ./fix-kali-postgres.sh (for Kali Linux)"
+        echo "   or: sudo ./fix-postgres-collation.sh (for other Linux)"
         echo
         echo "Press Enter to exit..."
         read
