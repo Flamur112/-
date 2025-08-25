@@ -428,6 +428,49 @@ if [ ! -f "mulic2" ]; then
     fi
 fi
 
+# Check for port conflicts and find available ports
+echo "🔍 Checking for port conflicts..."
+BACKEND_PORT=8080
+FRONTEND_PORT=5173
+
+# Check if backend port is available
+if command -v ss >/dev/null 2>&1; then
+    if ss -ltn "( sport = :$BACKEND_PORT )" | grep -q ":$BACKEND_PORT"; then
+        echo "❌ Port $BACKEND_PORT is already in use by another process"
+        echo "💡 To fix this, either:"
+        echo "   1) Stop the process using port $BACKEND_PORT:"
+        echo "      sudo ss -ltnp | grep :$BACKEND_PORT"
+        echo "      sudo kill -9 <PID>"
+        echo "   2) Or change backend port in backend/config.json:"
+        echo "      Edit 'server.api_port' to an available port"
+        echo "   3) Or change frontend port in frontend/config.json:"
+        echo "      Edit 'backend.api_port' to match backend"
+        echo
+        echo "Press Enter to exit and fix the port conflict..."
+        read
+        exit 1
+    fi
+    echo "✅ Backend port $BACKEND_PORT is available"
+fi
+
+# Check if frontend port is available
+if command -v ss >/dev/null 2>&1; then
+    if ss -ltn "( sport = :$FRONTEND_PORT )" | grep -q ":$FRONTEND_PORT"; then
+        echo "❌ Port $FRONTEND_PORT is already in use by another process"
+        echo "💡 To fix this, either:"
+        echo "   1) Stop the process using port $FRONTEND_PORT:"
+        echo "      sudo ss -ltnp | grep :$FRONTEND_PORT"
+        echo "      sudo kill -9 <PID>"
+        echo "   2) Or change frontend port in frontend/config.json:"
+        echo "      Edit 'frontend.port' to an available port"
+        echo
+        echo "Press Enter to exit and fix the port conflict..."
+        read
+        exit 1
+    fi
+    echo "✅ Frontend port $FRONTEND_PORT is available"
+fi
+
 # On Linux: allow binding to privileged ports (e.g., 443) without running as root
 NEEDS_PRIV_PORT=0
 if command -v jq >/dev/null 2>&1; then
@@ -469,7 +512,7 @@ sleep 8
 
 # Verify backend is running
 echo "🔍 Verifying backend is running..."
-if curl -s http://localhost:8080/api/health > /dev/null 2>&1; then
+if curl -s http://localhost:$BACKEND_PORT/api/health > /dev/null 2>&1; then
     echo "✅ Backend is running successfully"
 else
     echo "⚠️  Backend may not be fully started yet"
@@ -504,8 +547,8 @@ echo
 echo "========================================"
 echo "✅ MuliC2 is starting up!"
 echo
-echo "📱 Frontend: http://localhost:5173"
-echo "🔧 Backend API: http://localhost:8080"
+echo "📱 Frontend: http://localhost:$FRONTEND_PORT"
+echo "🔧 Backend API: http://localhost:$BACKEND_PORT"
 echo "🎯 C2 Listener: Port 8443 (TLS encrypted)"
 echo
 echo "💡 Logs will stream below. Press Ctrl+C to stop both services."
