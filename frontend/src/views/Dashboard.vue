@@ -602,10 +602,40 @@ interface Profile {
 
 const availableProfiles = ref<Profile[]>([])
 
+// Utility function for authenticated API requests
+const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+  const token = localStorage.getItem('auth_token')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options.headers as Record<string, string>
+  }
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  
+  const response = await fetch(url, {
+    ...options,
+    headers
+  })
+  
+  if (response.status === 401) {
+    console.error('API: Unauthorized - token may be invalid or expired')
+    ElMessage.error('Authentication required. Please log in again.')
+    // Clear invalid token and redirect to login
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('user_data')
+    window.location.href = '/login'
+    throw new Error('Unauthorized')
+  }
+  
+  return response
+}
+
 // Load available profiles
 const loadProfiles = async () => {
   try {
-    const response = await fetch('/api/profile/list')
+    const response = await authenticatedFetch('/api/profile/list')
     
     if (!response.ok) {
       console.error('Profile API not available - server returned:', response.status, response.statusText)
@@ -629,6 +659,9 @@ const loadProfiles = async () => {
       ElMessage.warning('No profiles found. Please create profiles in the backend configuration.')
     }
   } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return // Already handled by authenticatedFetch
+    }
     console.error('Failed to load profiles:', error)
     ElMessage.error('Failed to load profiles: Network error or server unavailable')
     availableProfiles.value = []
@@ -1027,9 +1060,9 @@ const updateStats = () => {
 const loadDashboardData = async () => {
   try {
     // TODO: Replace with actual API calls
-    // const implantsData = await fetch('/api/implants')
-    // const tasksData = await fetch('/api/tasks')
-    // const listenersData = await fetch('/api/listeners')
+    // const implantsData = await authenticatedFetch('/api/implants')
+    // const tasksData = await authenticatedFetch('/api/tasks')
+    // const listenersData = await authenticatedFetch('/api/listeners')
     
     // For now, use mock data but update stats
     updateStats()
