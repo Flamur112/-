@@ -1,7 +1,7 @@
 {
   "backend": {
     "api_port": 8080,
-    "c2_default_port": 8443
+    "c2_default_port": 50050
   },
   "frontend": {
     "port": 5173

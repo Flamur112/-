@@ -549,7 +549,7 @@ echo "✅ MuliC2 is starting up!"
 echo
 echo "📱 Frontend: http://localhost:$FRONTEND_PORT"
 echo "🔧 Backend API: http://localhost:$BACKEND_PORT"
-echo "🎯 C2 Listener: Port 8443 (TLS encrypted)"
+echo "🎯 C2 Listener: Port 50050 (TLS encrypted)"
 echo
 echo "💡 Logs will stream below. Press Ctrl+C to stop both services."
 echo "💡 Backend PID: $BACKEND_PID"

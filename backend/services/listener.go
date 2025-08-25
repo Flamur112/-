@@ -28,22 +28,27 @@ type Profile struct {
 // ListenerService manages C2 server listeners
 type ListenerService struct {
 	mu        sync.RWMutex
-	listener  net.Listener
-	server    net.Listener
+	listeners map[string]*listenerInstance // Map of profile ID to listener instance
 	ctx       context.Context
 	cancel    context.CancelFunc
-	active    bool
-	profile   *Profile
-	tlsConfig *tls.Config
+}
+
+// listenerInstance represents a single listener instance
+type listenerInstance struct {
+	listener net.Listener
+	profile  *Profile
+	active   bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // NewListenerService creates a new listener service
 func NewListenerService() *ListenerService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ListenerService{
-		ctx:    ctx,
-		cancel: cancel,
-		active: false,
+		listeners: make(map[string]*listenerInstance),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 }
 
@@ -97,14 +102,14 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	// Check if already active
-	if ls.active {
-		return fmt.Errorf("listener is already active")
-	}
-
 	// Validate profile
 	if profile == nil {
 		return fmt.Errorf("profile cannot be nil")
+	}
+
+	// Check if this specific profile is already active
+	if existing, exists := ls.listeners[profile.ID]; exists && existing.active {
+		return fmt.Errorf("listener for profile '%s' (ID: %s) is already active", profile.Name, profile.ID)
 	}
 
 	// Check if port is privileged (requires root or setcap)
@@ -167,12 +172,21 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 		return fmt.Errorf("failed to create listener - listener is nil")
 	}
 
-	ls.listener = listener
-	ls.profile = profile
-	ls.active = true
+	// Create listener instance
+	instanceCtx, instanceCancel := context.WithCancel(ls.ctx)
+	instance := &listenerInstance{
+		listener: listener,
+		profile:  profile,
+		active:   true,
+		ctx:      instanceCtx,
+		cancel:   instanceCancel,
+	}
+
+	// Store the instance
+	ls.listeners[profile.ID] = instance
 
 	// Start accepting connections in a goroutine
-	go ls.acceptConnections()
+	go ls.acceptConnections(instance)
 
 	return nil
 }
@@ -215,12 +229,17 @@ func (ls *ListenerService) findAvailablePorts(host string, requestedPort int) []
 	return availablePorts
 }
 
-// StopListener stops the current listener
-func (ls *ListenerService) StopListener() error {
+// StopListener stops a specific listener by profile ID
+func (ls *ListenerService) StopListener(profileID string) error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	if !ls.active {
+	instance, exists := ls.listeners[profileID]
+	if !exists {
+		return fmt.Errorf("listener for profile ID '%s' not found", profileID)
+	}
+
+	if !instance.active {
 		return nil
 	}
 
@@ -231,48 +250,69 @@ func (ls *ListenerService) StopListener() error {
 		}
 	}()
 
-	ls.stopListenerInternal()
+	ls.stopListenerInternal(profileID)
 
 	// Safe access to profile name
 	profileName := "unknown"
-	if ls.profile != nil {
-		profileName = ls.profile.Name
+	if instance.profile != nil {
+		profileName = instance.profile.Name
 	}
 
 	log.Printf("🛑 C2 Listener stopped (Profile: %s)", profileName)
 	return nil
 }
 
-// stopListenerInternal stops the listener without locking (internal use)
-func (ls *ListenerService) stopListenerInternal() {
-	if ls.listener != nil {
-		ls.listener.Close()
-		ls.listener = nil
+// stopListenerInternal stops a specific listener without locking (internal use)
+func (ls *ListenerService) stopListenerInternal(profileID string) {
+	instance, exists := ls.listeners[profileID]
+	if !exists {
+		return
 	}
-	ls.active = false
-	ls.profile = nil
+
+	if instance.listener != nil {
+		instance.listener.Close()
+		instance.listener = nil
+	}
+	instance.active = false
+	instance.cancel()
+
+	// Remove from map
+	delete(ls.listeners, profileID)
+}
+
+// StopAllListeners stops all active listeners
+func (ls *ListenerService) StopAllListeners() error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	for profileID := range ls.listeners {
+		ls.stopListenerInternal(profileID)
+	}
+
+	log.Printf("🛑 All C2 Listeners stopped")
+	return nil
 }
 
 // acceptConnections handles incoming connections
-func (ls *ListenerService) acceptConnections() {
+func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
 	for {
 		select {
-		case <-ls.ctx.Done():
+		case <-instance.ctx.Done():
 			return
 		default:
 			// Set a timeout for accepting connections
-			if tcpListener, ok := ls.listener.(*net.TCPListener); ok {
+			if tcpListener, ok := instance.listener.(*net.TCPListener); ok {
 				tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
 			}
 
-			conn, err := ls.listener.Accept()
+			conn, err := instance.listener.Accept()
 			if err != nil {
 				// Check if it's a timeout error (expected)
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue
 				}
 				// Check if listener was closed
-				if ls.ctx.Err() != nil {
+				if instance.ctx.Err() != nil {
 					return
 				}
 				log.Printf("Error accepting connection: %v", err)
@@ -280,13 +320,13 @@ func (ls *ListenerService) acceptConnections() {
 			}
 
 			// Handle the connection in a goroutine
-			go ls.handleConnection(conn)
+			go ls.handleConnection(conn, instance)
 		}
 	}
 }
 
 // handleConnection handles an individual client connection
-func (ls *ListenerService) handleConnection(conn net.Conn) {
+func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance) {
 	defer conn.Close()
 
 	remoteAddr := conn.RemoteAddr().String()
@@ -305,8 +345,8 @@ func (ls *ListenerService) handleConnection(conn net.Conn) {
 
 	// Send welcome message with connection details
 	profileName := "unknown"
-	if ls.profile != nil {
-		profileName = ls.profile.Name
+	if instance.profile != nil {
+		profileName = instance.profile.Name
 	}
 	welcomeMsg := fmt.Sprintf("Welcome to MuliC2 - Profile: %s\n", profileName)
 	welcomeMsg += fmt.Sprintf("Connection: %s\n", connType)
@@ -346,8 +386,8 @@ func (ls *ListenerService) handleConnection(conn net.Conn) {
 			conn.Write([]byte(version + "\nPS > "))
 		case "status":
 			profileName := "unknown"
-			if ls.profile != nil {
-				profileName = ls.profile.Name
+			if instance.profile != nil {
+				profileName = instance.profile.Name
 			}
 			status := fmt.Sprintf("Active: true | Profile: %s | Connection: %s",
 				profileName, connType)
@@ -385,45 +425,84 @@ func tlsVersionString(version uint16) string {
 	}
 }
 
-// GetStatus returns the current listener status
+// GetStatus returns the current listener status for all profiles
 func (ls *ListenerService) GetStatus() map[string]interface{} {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"active": ls.active,
+		"total_listeners":  len(ls.listeners),
+		"active_listeners": 0,
+		"profiles":         make(map[string]interface{}),
 	}
 
-	if ls.active && ls.profile != nil {
-		status["profile"] = ls.profile
-		status["address"] = fmt.Sprintf("%s:%d", ls.profile.Host, ls.profile.Port)
+	for profileID, instance := range ls.listeners {
+		if instance.active {
+			status["active_listeners"] = status["active_listeners"].(int) + 1
+		}
+
+		profileStatus := map[string]interface{}{
+			"active": instance.active,
+		}
+
+		if instance.active && instance.profile != nil {
+			profileStatus["profile"] = instance.profile
+			profileStatus["address"] = fmt.Sprintf("%s:%d", instance.profile.Host, instance.profile.Port)
+		}
+
+		status["profiles"].(map[string]interface{})[profileID] = profileStatus
 	}
 
 	return status
 }
 
-// IsActive returns whether the listener is currently active
+// IsActive returns whether any listener is currently active
 func (ls *ListenerService) IsActive() bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
-	return ls.active
+
+	for _, instance := range ls.listeners {
+		if instance.active {
+			return true
+		}
+	}
+	return false
 }
 
-// GetActiveProfile returns the currently active profile
-func (ls *ListenerService) GetActiveProfile() *Profile {
+// IsProfileActive returns whether a specific profile is active
+func (ls *ListenerService) IsProfileActive(profileID string) bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
-	return ls.profile
+
+	instance, exists := ls.listeners[profileID]
+	return exists && instance.active
 }
 
-// Close shuts down the listener service
+// GetActiveProfiles returns all currently active profiles
+func (ls *ListenerService) GetActiveProfiles() []*Profile {
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
+
+	var activeProfiles []*Profile
+	for _, instance := range ls.listeners {
+		if instance.active && instance.profile != nil {
+			activeProfiles = append(activeProfiles, instance.profile)
+		}
+	}
+	return activeProfiles
+}
+
+// Close shuts down all listeners
 func (ls *ListenerService) Close() error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
 	ls.cancel()
-	if ls.listener != nil {
-		return ls.listener.Close()
+
+	// Close all listeners
+	for profileID := range ls.listeners {
+		ls.stopListenerInternal(profileID)
 	}
+
 	return nil
 }
