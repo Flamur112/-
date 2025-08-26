@@ -401,7 +401,16 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 		log.Printf("🔌 New TCP connection from %s", remoteAddr)
 	}
 
-	// Check if this is an HTTP request (for unified API mode)
+	// Check if this is a VNC connection FIRST (before HTTP detection)
+	// VNC connections send 4-byte length headers followed by image data
+	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
+	if vncDetected {
+		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
+		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
+		return
+	}
+
+	// Check if this is an HTTP request (for unified API mode) - ONLY if not VNC
 	if ls.router != nil {
 		// Create a buffered reader to peek at the request
 		reader := bufio.NewReader(conn)
@@ -430,15 +439,6 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 				return
 			}
 		}
-	}
-
-	// Check if this is a VNC connection by looking for VNC-specific data patterns
-	// VNC connections send 4-byte length headers followed by image data
-	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
-	if vncDetected {
-		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
-		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
-		return
 	}
 
 	// Send welcome message with connection details
@@ -553,6 +553,18 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
 			log.Printf("🔍 VNC RFB header detected")
 			// Return a buffered connection wrapper
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+	}
+
+	// Check for PowerShell VNC payload pattern (4-byte length header)
+	// This is what your PowerShell script sends
+	if len(peekBytes) >= 4 {
+		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
+
+		// PowerShell VNC sends JPEG frames, typically 1KB to 50KB
+		if frameLength >= 1024 && frameLength <= 1024*50 {
+			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
