@@ -47,7 +47,7 @@ type VNCService struct {
 func NewVNCService() *VNCService {
 	return &VNCService{
 		connections:  make(map[string]*VNCConnection),
-		frameChannel: make(chan VNCFrame, 1000), // Large buffer to prevent blocking
+		frameChannel: make(chan VNCFrame, 100), // Buffer 100 frames
 	}
 }
 
@@ -58,9 +58,9 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 	vncConn := &VNCConnection{
 		ID:          connectionID,
 		AgentIP:     agentIP,
-		Hostname:    "Unknown",
-		Resolution:  "200x150",
-		FPS:         5,
+		Hostname:    "Unknown", // Will be updated when we receive agent info
+		Resolution:  "200x150", // Default from PowerShell script
+		FPS:         5,         // Default from PowerShell script
 		ConnectedAt: time.Now(),
 		LastFrame:   time.Now(),
 		FrameCount:  0,
@@ -80,24 +80,20 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 	go vs.processVNCStream(vncConn)
 }
 
-// processVNCStream processes the incoming VNC stream with maximum stability
+// processVNCStream processes the incoming VNC stream with robust error handling
 func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 	defer func() {
-		// Cleanup when connection closes
 		vs.mu.Lock()
 		delete(vs.connections, vncConn.ID)
 		vs.mu.Unlock()
-
-		// Don't close the connection here - let the client close it
-		log.Printf("🔍 VNC connection processing ended: %s", vncConn.ID)
+		vncConn.conn.Close()
+		log.Printf("🔍 VNC connection closed: %s", vncConn.ID)
 	}()
 
-	// Set a very long read timeout to prevent premature closure
-	vncConn.conn.SetReadDeadline(time.Now().Add(24 * time.Hour)) // 24 hour timeout
-
-	log.Printf("🔍 DEBUG: Starting VNC stream processing for %s", vncConn.ID)
-
 	for vncConn.IsActive {
+		// Set generous read timeout for each frame
+		vncConn.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
 		// Read frame length (4 bytes)
 		lengthBytes := make([]byte, 4)
 		n, err := io.ReadFull(vncConn.conn, lengthBytes)
@@ -109,14 +105,16 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			}
 			break
 		}
+		if n != 4 {
+			log.Printf("🔍 Incomplete frame length read from %s: got %d bytes, expected 4", vncConn.ID, n)
+			break
+		}
 
-		// Parse frame length (PowerShell sends little-endian)
 		frameLength := binary.LittleEndian.Uint32(lengthBytes)
-		log.Printf("🔍 DEBUG: Received frame length: %d bytes", frameLength)
+		log.Printf("🔍 DEBUG: Using little-endian frame length: %d bytes", frameLength)
 
-		// Validate frame length
 		if frameLength < 100 || frameLength > 1024*100 {
-			log.Printf("🔍 Invalid frame length: %d bytes, skipping", frameLength)
+			log.Printf("🔍 Invalid frame length from %s: %d bytes (expected 100B-100KB)", vncConn.ID, frameLength)
 			continue
 		}
 
@@ -134,11 +132,17 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		frameData := make([]byte, frameLength)
 		n, err = io.ReadFull(vncConn.conn, frameData)
 		if err != nil {
-			log.Printf("🔍 Error reading frame data: %v", err)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				log.Printf("🔍 VNC client closed connection while reading frame data: %s", vncConn.ID)
+			} else {
+				log.Printf("🔍 Error reading frame data from %s: %v", vncConn.ID, err)
+			}
 			break
 		}
-
-		log.Printf("🔍 DEBUG: Successfully read frame data: %d bytes", n)
+		if n != int(frameLength) {
+			log.Printf("🔍 Incomplete frame data read from %s: got %d bytes, expected %d", vncConn.ID, n, frameLength)
+			break
+		}
 
 		// Update connection stats
 		vncConn.mu.Lock()
@@ -156,7 +160,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			Size:         len(frameData),
 		}
 
-		// Send frame to frontend (non-blocking with large buffer)
+		// Send frame to frontend (non-blocking)
 		select {
 		case vs.frameChannel <- frame:
 			log.Printf("🔍 Frame #%d sent to frontend from %s (Size: %d bytes)",
@@ -164,15 +168,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		default:
 			log.Printf("🔍 Frame buffer full, dropping frame from %s", vncConn.ID)
 		}
-
-		log.Printf("🔍 DEBUG: Frame #%d processed successfully, waiting for next frame...", vncConn.FrameCount)
-
-		// Reset read timeout to prevent connection closure
-		vncConn.conn.SetReadDeadline(time.Now().Add(24 * time.Hour))
-		log.Printf("🔍 DEBUG: Read timeout reset to 24 hours")
 	}
-
-	log.Printf("🔍 DEBUG: VNC stream processing loop ended for %s", vncConn.ID)
 }
 
 // GetFrameChannel returns the channel for receiving frames
@@ -184,6 +180,8 @@ func (vs *VNCService) GetFrameChannel() <-chan VNCFrame {
 func (vs *VNCService) GetActiveConnections() []map[string]interface{} {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
+
+	log.Printf("🔍 GetActiveConnections called, total connections: %d", len(vs.connections))
 
 	var connections []map[string]interface{}
 	for _, conn := range vs.connections {
@@ -201,6 +199,7 @@ func (vs *VNCService) GetActiveConnections() []map[string]interface{} {
 		}
 		conn.mu.RUnlock()
 		connections = append(connections, connectionInfo)
+		log.Printf("🔍 Connection %s: %s (%s) - Active: %v", conn.ID, conn.Hostname, conn.AgentIP, conn.IsActive)
 	}
 
 	return connections
