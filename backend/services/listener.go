@@ -401,14 +401,16 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 		log.Printf("🔌 New TCP connection from %s", remoteAddr)
 	}
 
-	// Check if this is a VNC connection FIRST (before HTTP detection)
+	// IMMEDIATELY check if this is a VNC connection (before any other detection)
 	// VNC connections send 4-byte length headers followed by image data
+	log.Printf("🔍 DEBUG: About to detect VNC connection from %s", remoteAddr)
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
 	if vncDetected {
 		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
 		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
 		return
 	}
+	log.Printf("🔍 DEBUG: VNC detection completed, not a VNC connection")
 
 	// Check if this is an HTTP request (for unified API mode) - ONLY if not VNC
 	if ls.router != nil {
