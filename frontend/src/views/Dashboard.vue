@@ -285,8 +285,8 @@
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="C2 Port:">
-                    <el-input v-model="vncForm.c2Port" :disabled="true" placeholder="Auto from active TLS profile" />
-                    <span class="form-help">Auto-detected from active TLS profile</span>
+                    <el-input :model-value="vncForm.c2Port" disabled placeholder="Auto from active TLS listener" />
+                    <span class="form-help">Auto-detected from active TLS listener</span>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -903,6 +903,10 @@ const startListener = async (listener: any) => {
     
     const result = await response.json()
     listener.isActive = true
+    // If this is TLS, refresh C2 port from this listener
+    if (listener.useTLS) {
+      vncForm.value.c2Port = String(listener.port)
+    }
     ElMessage.success(`Started listener: ${listener.name}`)
   } catch (error) {
     console.error('Failed to start listener:', error)
@@ -929,6 +933,13 @@ const stopListener = async (listener: any) => {
     }
     
     listener.isActive = false
+    // If we stopped the active TLS listener, try to pick another active TLS listener or profile
+    if (listener.useTLS) {
+      setPortFromActiveListener()
+      if (!activeTLSListener.value) {
+        setPortFromActiveProfile()
+      }
+    }
     ElMessage.success(`Stopped listener: ${listener.name}`)
   } catch (error) {
     if (error !== 'cancel') {
@@ -991,7 +1002,10 @@ const disconnectAgent = async (agent: any) => {
 // VNC Payload Generator Functions
 const generateVncPayload = async () => {
   // Ensure C2 port is auto-detected
-  setPortFromActiveProfile()
+  setPortFromActiveListener()
+  if (!activeTLSListener.value) {
+    setPortFromActiveProfile()
+  }
 
   if (!vncForm.value.lhost || !vncForm.value.lport) {
     ElMessage.error('Please provide LHOST and VNC LPORT')
@@ -1003,7 +1017,7 @@ const generateVncPayload = async () => {
   try {
     // Use the LHOST as the C2 server and get the C2 port from the form
     const c2Host = vncForm.value.lhost
-    const c2Port = activeTLSProfile.value ? String(activeTLSProfile.value.port) : (vncForm.value.c2Port || '443')
+    const c2Port = vncForm.value.c2Port || (activeTLSProfile.value ? String(activeTLSProfile.value.port) : '443')
     const vncPort = vncForm.value.lport
     
     console.log('VNC Configuration:', { c2Host, c2Port, vncPort })
@@ -1538,6 +1552,8 @@ const loadDashboardData = async () => {
     if (listenersData.ok) {
       const data = await listenersData.json()
       listeners.value = data.listeners || []
+      // Update C2 port from active TLS listener if available
+      setPortFromActiveListener()
     }
     
     // TODO: Replace with actual API calls for other data
@@ -1562,6 +1578,17 @@ const activeTLSProfile = computed<Profile | undefined>(() => {
 const setPortFromActiveProfile = () => {
   if (activeTLSProfile.value) {
     vncForm.value.c2Port = String(activeTLSProfile.value.port)
+  }
+}
+
+// Prefer the actual active TLS listener from backend state
+const activeTLSListener = computed<Listener | undefined>(() => {
+  return listeners.value.find(l => l.isActive && l.useTLS)
+})
+
+const setPortFromActiveListener = () => {
+  if (activeTLSListener.value) {
+    vncForm.value.c2Port = String(activeTLSListener.value.port)
   }
 }
 </script>
