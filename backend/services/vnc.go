@@ -91,8 +91,8 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		log.Printf("🔍 VNC connection closed: %s", vncConn.ID)
 	}()
 
-	// Set read timeout
-	vncConn.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	// Set read timeout - increase to be more lenient
+	vncConn.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	for vncConn.IsActive {
 		// Read frame length (4 bytes) with proper error handling
@@ -100,7 +100,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		n, err := io.ReadFull(vncConn.conn, lengthBytes)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				log.Printf("🔍 VNC connection closed by client: %s", vncConn.ID)
+				log.Printf("🔍 VNC connection closed by client (EOF): %s", vncConn.ID)
 			} else {
 				log.Printf("🔍 Error reading frame length from %s: %v", vncConn.ID, err)
 			}
@@ -153,6 +153,8 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			break
 		}
 
+		log.Printf("🔍 DEBUG: Successfully read frame data: %d bytes", n)
+
 		// Update connection stats
 		vncConn.mu.Lock()
 		vncConn.FrameCount++
@@ -178,8 +180,11 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			log.Printf("🔍 Frame buffer full, dropping frame from %s", vncConn.ID)
 		}
 
-		// Reset read timeout
-		vncConn.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		log.Printf("🔍 DEBUG: Frame #%d processed successfully, waiting for next frame...", vncConn.FrameCount)
+
+		// Reset read timeout - be more lenient with timeouts
+		vncConn.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		log.Printf("🔍 DEBUG: Read timeout reset to 60 seconds")
 	}
 }
 
