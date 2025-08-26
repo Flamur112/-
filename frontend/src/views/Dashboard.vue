@@ -182,10 +182,10 @@
             <el-table-column prop="protocol" label="Protocol" width="100" />
             <el-table-column prop="host" label="Host" width="150" />
             <el-table-column prop="port" label="Port" width="100" />
-            <el-table-column prop="status" label="Status" width="100">
+            <el-table-column prop="isActive" label="Status" width="100">
               <template #default="scope">
-                <el-tag :type="scope.row.status === 'active' ? 'success' : 'info'">
-                  {{ scope.row.status }}
+                <el-tag :type="scope.row.isActive ? 'success' : 'info'">
+                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -193,15 +193,15 @@
             <el-table-column prop="createdAt" label="Created" width="180" />
             <el-table-column label="Actions" width="200">
               <template #default="scope">
-                <el-button size="small" @click="startListener(scope.row)" v-if="scope.row.status !== 'active'">
+                <el-button size="small" @click="startListener(scope.row)" v-if="!scope.row.isActive">
                   <el-icon><CaretRight /></el-icon>
                   Start
                 </el-button>
-                <el-button size="small" type="warning" @click="stopListener(scope.row)" v-if="scope.row.status === 'active'">
+                <el-button size="small" type="warning" @click="stopListener(scope.row)" v-if="scope.row.isActive">
                   <el-icon><CaretLeft /></el-icon>
                   Stop
                 </el-button>
-                <el-button size="small" type="danger" @click="deleteListener(scope.row)" v-if="scope.row.status !== 'active'">
+                <el-button size="small" type="danger" @click="deleteListener(scope.row)" v-if="!scope.row.isActive">
                   <el-icon><Delete /></el-icon>
                   Delete
                 </el-button>
@@ -541,12 +541,16 @@ interface Task {
 interface Listener {
   id: string
   name: string
-  protocol: string
+  projectName?: string
   host: string
-  port: string
-  status: string
-  connections: number
+  port: number
+  description?: string
+  useTLS: boolean
+  certFile?: string
+  keyFile?: string
+  isActive: boolean
   createdAt: string
+  updatedAt: string
 }
 
 // Dashboard state
@@ -567,18 +571,7 @@ const implants = ref<Implant[]>([])
 const tasks = ref<Task[]>([])
 
 // Listeners data
-const listeners = ref<Listener[]>([
-  {
-    id: '1',
-    name: 'Default TCP',
-    protocol: 'TCP',
-    host: '0.0.0.0',
-    port: '8080',
-    status: 'active',
-    connections: 0,
-    createdAt: new Date().toLocaleString()
-  }
-])
+const listeners = ref<Listener[]>([])
 
 // Command dialog
 const commandDialogVisible = ref(false)
@@ -733,11 +726,11 @@ const onlineImplants = computed(() => {
 })
 
 const hasActiveListener = computed(() => {
-  return listeners.value.some(listener => listener.status === 'active')
+  return listeners.value.some(listener => listener.isActive)
 })
 
 const activeListener = computed(() => {
-  return listeners.value.find(listener => listener.status === 'active')
+  return listeners.value.find(listener => listener.isActive)
 })
 
 // Methods
@@ -845,27 +838,36 @@ const createListener = async () => {
   creatingListener.value = true
   
   try {
-    // TODO: Implement actual listener creation logic
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // Create listener via API
+    const response = await authenticatedFetch('/api/listeners', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: listenerForm.value.name,
+        projectName: 'MuliC2',
+        host: listenerForm.value.host,
+        port: parseInt(listenerForm.value.port),
+        description: listenerForm.value.description,
+        useTLS: listenerForm.value.protocol === 'tls',
+        certFile: listenerForm.value.protocol === 'tls' ? '../server.crt' : '',
+        keyFile: listenerForm.value.protocol === 'tls' ? '../server.key' : '',
+        isActive: false
+      })
+    })
     
-    const newListener = {
-      id: Date.now().toString(),
-      name: listenerForm.value.name,
-      protocol: listenerForm.value.protocol.toUpperCase(),
-      host: listenerForm.value.host,
-      port: listenerForm.value.port,
-      status: 'inactive',
-      connections: 0,
-      createdAt: new Date().toLocaleString()
+    if (!response.ok) {
+      throw new Error(`Failed to create listener: ${response.status}`)
     }
     
-    listeners.value.push(newListener)
+    const newListener = await response.json()
+    listeners.value.unshift(newListener)
     
     ElMessage.success('Listener created successfully')
     listenerDialogVisible.value = false
     listenerForm.value = { name: '', protocol: 'tcp', host: '0.0.0.0', port: '8080', description: '' }
   } catch (error) {
-    ElMessage.error('Failed to create listener')
+    console.error('Failed to create listener:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    ElMessage.error(`Failed to create listener: ${errorMessage}`)
   } finally {
     creatingListener.value = false
   }
@@ -873,13 +875,22 @@ const createListener = async () => {
 
 const startListener = async (listener: any) => {
   try {
-    // TODO: Implement actual listener start logic
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    // Start listener via API
+    const response = await authenticatedFetch(`/api/listeners/${listener.id}/start`, {
+      method: 'POST'
+    })
     
-    listener.status = 'active'
+    if (!response.ok) {
+      throw new Error(`Failed to start listener: ${response.status}`)
+    }
+    
+    const result = await response.json()
+    listener.isActive = true
     ElMessage.success(`Started listener: ${listener.name}`)
   } catch (error) {
-    ElMessage.error('Failed to start listener')
+    console.error('Failed to start listener:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    ElMessage.error(`Failed to start listener: ${errorMessage}`)
   }
 }
 
@@ -891,12 +902,23 @@ const stopListener = async (listener: any) => {
       { confirmButtonText: 'Stop', cancelButtonText: 'Cancel', type: 'warning' }
     )
     
-    // TODO: Implement actual listener stop logic
-    listener.status = 'inactive'
-    listener.connections = 0
+    // Stop listener via API
+    const response = await authenticatedFetch(`/api/listeners/${listener.id}/stop`, {
+      method: 'POST'
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to stop listener: ${response.status}`)
+    }
+    
+    listener.isActive = false
     ElMessage.success(`Stopped listener: ${listener.name}`)
-  } catch {
-    // User cancelled
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to stop listener:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      ElMessage.error(`Failed to stop listener: ${errorMessage}`)
+    }
   }
 }
 
@@ -908,10 +930,23 @@ const deleteListener = async (listener: any) => {
       { confirmButtonText: 'Delete', cancelButtonText: 'Cancel', type: 'warning' }
     )
     
+    // Delete listener via API
+    const response = await authenticatedFetch(`/api/listeners/${listener.id}`, {
+      method: 'DELETE'
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to delete listener: ${response.status}`)
+    }
+    
     listeners.value = listeners.value.filter(l => l.id !== listener.id)
     ElMessage.success('Listener deleted')
-  } catch {
-    // User cancelled
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to delete listener:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      ElMessage.error(`Failed to delete listener: ${errorMessage}`)
+    }
   }
 }
 
@@ -1466,7 +1501,7 @@ onMounted(() => {
 // Update dashboard statistics
 const updateStats = () => {
   stats.value.totalImplants = implants.value.length
-  stats.value.activeListeners = listeners.value.filter(l => l.status === 'active').length
+  stats.value.activeListeners = listeners.value.filter(l => l.isActive).length
   stats.value.runningTasks = tasks.value.filter(t => t.status === 'running').length
   
   const onlineImplants = implants.value.filter(i => i.status === 'online')
@@ -1478,12 +1513,18 @@ const updateStats = () => {
 // Load dashboard data from backend
 const loadDashboardData = async () => {
   try {
-    // TODO: Replace with actual API calls
+    // Load listeners from API
+    const listenersData = await authenticatedFetch('/api/listeners')
+    if (listenersData.ok) {
+      const data = await listenersData.json()
+      listeners.value = data.listeners || []
+    }
+    
+    // TODO: Replace with actual API calls for other data
     // const implantsData = await authenticatedFetch('/api/implants')
     // const tasksData = await authenticatedFetch('/api/tasks')
-    // const listenersData = await authenticatedFetch('/api/listeners')
     
-    // For now, use mock data but update stats
+    // Update stats with real data
     updateStats()
   } catch (error) {
     console.error('Failed to load dashboard data:', error)
