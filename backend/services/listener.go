@@ -521,6 +521,8 @@ func (c *bufferedConn) Read(p []byte) (n int, err error) {
 // detectVNCConnection detects if a connection is a VNC connection
 // Returns (isVNC, connection) - if VNC detected, returns a buffered connection
 func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
+	log.Printf("🔍 DEBUG: Starting VNC detection for connection")
+
 	// Use a more sophisticated detection method that doesn't consume data
 	// VNC connections typically send specific patterns
 
@@ -530,13 +532,17 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 	// Peek at the first few bytes to detect VNC patterns
 	peekBytes, err := reader.Peek(8)
 	if err != nil {
+		log.Printf("🔍 DEBUG: Could not peek at data: %v", err)
 		// If we can't peek, assume it's not VNC
 		return false, conn
 	}
 
+	log.Printf("🔍 DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)
+
 	// Check for VNC frame header pattern (4-byte length + reasonable size)
 	if len(peekBytes) >= 4 {
 		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
+		log.Printf("🔍 DEBUG: Frame length detected: %d bytes", frameLength)
 
 		// VNC frames are typically between 100 bytes and 1MB
 		if frameLength >= 100 && frameLength <= 1024*1024 {
@@ -569,6 +575,7 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 		}
 	}
 
+	log.Printf("🔍 DEBUG: No VNC pattern detected")
 	return false, conn
 }
 
