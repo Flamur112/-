@@ -551,7 +551,24 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
 		log.Printf("🔍 DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
 
-		// Check if either endianness gives a reasonable frame size
+		// Check for PowerShell VNC specifically FIRST (JPEG frames, typically 1KB to 50KB)
+		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
+			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
+
+			var frameLength uint32
+			if frameLengthBE >= 1024 && frameLengthBE <= 1024*50 {
+				frameLength = frameLengthBE
+				log.Printf("🔍 DEBUG: PowerShell VNC detected with big-endian: %d bytes", frameLength)
+			} else {
+				frameLength = frameLengthLE
+				log.Printf("🔍 DEBUG: PowerShell VNC detected with little-endian: %d bytes", frameLength)
+			}
+
+			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+
+		// Check if either endianness gives a reasonable frame size for general VNC
 		if (frameLengthBE >= 100 && frameLengthBE <= 1024*1024) ||
 			(frameLengthLE >= 100 && frameLengthLE <= 1024*1024) {
 
@@ -567,21 +584,6 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 
 			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
 			// Return a buffered connection wrapper
-			return true, &bufferedConn{Conn: conn, reader: reader}
-		}
-
-		// Check for PowerShell VNC specifically (JPEG frames, typically 1KB to 50KB)
-		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
-			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
-
-			var frameLength uint32
-			if frameLengthBE >= 1024 && frameLengthBE <= 1024*50 {
-				frameLength = frameLengthBE
-			} else {
-				frameLength = frameLengthLE
-			}
-
-			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
