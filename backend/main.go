@@ -163,6 +163,53 @@ func main() {
 	api.Handle("/tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.EnqueueTask))).Methods("POST")
 	api.Handle("/agent-tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.GetAgentTasks))).Methods("GET")
 
+	// VNC endpoints (protected)
+	api.Handle("/vnc/connections", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connections := listenerService.GetVNCService().GetActiveConnections()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"connections": connections,
+		})
+	}))).Methods("GET")
+
+	// VNC frame streaming endpoint (Server-Sent Events)
+	api.Handle("/vnc/stream", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		// Get VNC service
+		vncService := listenerService.GetVNCService()
+		frameChannel := vncService.GetFrameChannel()
+
+		// Create a channel to detect client disconnect
+		notify := w.(http.CloseNotifier).CloseNotify()
+
+		for {
+			select {
+			case frame := <-frameChannel:
+				// Send frame data as SSE
+				frameData := map[string]interface{}{
+					"connection_id": frame.ConnectionID,
+					"timestamp":     frame.Timestamp,
+					"width":         frame.Width,
+					"height":        frame.Height,
+					"data":          frame.Data,
+					"size":          frame.Size,
+				}
+				
+				frameJSON, _ := json.Marshal(frameData)
+				fmt.Fprintf(w, "data: %s\n\n", frameJSON)
+				w.(http.Flusher).Flush()
+
+			case <-notify:
+				// Client disconnected
+				return
+			}
+		}
+	}))).Methods("GET")
+
 	// Health check endpoint
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

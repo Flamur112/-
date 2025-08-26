@@ -4,6 +4,7 @@ import (
 	"bufio" // Added for httpConn
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -34,6 +35,7 @@ type ListenerService struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	router    http.Handler // HTTP router for unified API mode
+	vncService *VNCService // VNC service for handling VNC connections
 }
 
 // listenerInstance represents a single listener instance
@@ -49,9 +51,10 @@ type listenerInstance struct {
 func NewListenerService() *ListenerService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ListenerService{
-		listeners: make(map[string]*listenerInstance),
-		ctx:       ctx,
-		cancel:    cancel,
+		listeners:  make(map[string]*listenerInstance),
+		ctx:        ctx,
+		cancel:     cancel,
+		vncService: NewVNCService(),
 	}
 }
 
@@ -60,6 +63,11 @@ func (ls *ListenerService) SetRouter(router http.Handler) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	ls.router = router
+}
+
+// GetVNCService returns the VNC service instance
+func (ls *ListenerService) GetVNCService() *VNCService {
+	return ls.vncService
 }
 
 // createTLSConfig creates TLS configuration with TLS 1.3 support
@@ -405,6 +413,14 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 		}
 	}
 
+	// Check if this is a VNC connection by looking for VNC-specific data patterns
+	// VNC connections send 4-byte length headers followed by image data
+	if ls.detectVNCConnection(conn) {
+		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
+		ls.vncService.HandleVNCConnection(conn, remoteAddr)
+		return
+	}
+
 	// Send welcome message with connection details
 	profileName := "unknown"
 	if instance.profile != nil {
@@ -470,6 +486,29 @@ type httpConn struct {
 
 func (c *httpConn) Read(p []byte) (n int, err error) {
 	return c.reader.Read(p)
+}
+
+// detectVNCConnection detects if a connection is a VNC connection
+func (ls *ListenerService) detectVNCConnection(conn net.Conn) bool {
+	// Set a short timeout for detection
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	defer conn.SetReadDeadline(time.Time{}) // Reset timeout
+
+	// Try to read 4 bytes (VNC frame length header)
+	lengthBytes := make([]byte, 4)
+	n, err := conn.Read(lengthBytes)
+	if err != nil || n != 4 {
+		return false
+	}
+
+	// Check if the length is reasonable (VNC frames are typically 1KB to 1MB)
+	frameLength := binary.BigEndian.Uint32(lengthBytes)
+	if frameLength < 100 || frameLength > 1024*1024 {
+		return false
+	}
+
+	// This looks like a VNC connection
+	return true
 }
 
 // handleHTTPRequest handles HTTP requests in unified mode
