@@ -599,7 +599,7 @@ const creatingListener = ref(false)
 // VNC Payload Generator
 const vncForm = ref({
   lhost: '',
-  lport: '5900',
+  lport: '5900', // VNC target port (this is correct)
   c2Port: '443', // C2 server port
   payloadType: 'powershell',
   useLoader: true
@@ -840,6 +840,16 @@ const createListener = async () => {
   if (!listenerForm.value.name || !listenerForm.value.port) {
     ElMessage.error('Please fill in all required fields')
     return
+  }
+  
+  // Validate port - prevent VNC ports and privileged ports
+  const port = parseInt(listenerForm.value.port)
+  if (port === 5900 || port === 5901 || port === 5902) {
+    ElMessage.error('Port 5900-5902 are VNC ports. Please use a different port for C2 listeners.')
+    return
+  }
+  if (port < 1024) {
+    ElMessage.warning('Ports below 1024 require root privileges. Consider using port 8080, 8443, or 8444.')
   }
   
   creatingListener.value = true

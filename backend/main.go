@@ -341,6 +341,142 @@ func main() {
 		w.Write([]byte(`{"status": "healthy", "service": "mulic2"}`))
 	}).Methods("GET")
 
+	// Listener management endpoints (protected)
+	router.Handle("/api/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			// List all listeners
+			listeners, err := listenerStorage.GetAllListeners()
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"listeners": listeners,
+			})
+		case "POST":
+			// Create new listener
+			var listener services.StoredListener
+			if err := json.NewDecoder(r.Body).Decode(&listener); err != nil {
+				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				return
+			}
+			listener.ID = fmt.Sprintf("listener_%d", time.Now().Unix())
+			listener.CreatedAt = time.Now()
+			listener.UpdatedAt = time.Now()
+
+			if err := listenerStorage.SaveListener(&listener); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(listener)
+		}
+	}))).Methods("GET", "POST")
+
+	// Listener start/stop endpoints
+	router.Handle("/api/listeners/{id}/start", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		// Update listener status to active
+		if err := listenerStorage.UpdateListenerStatus(id, true); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Get listener details and start it
+		listener, err := listenerStorage.GetListener(id)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
+			return
+		}
+
+		// Convert to Profile and start
+		profile := &services.Profile{
+			ID:          listener.ID,
+			Name:        listener.Name,
+			ProjectName: listener.ProjectName,
+			Host:        listener.Host,
+			Port:        listener.Port,
+			Description: listener.Description,
+			UseTLS:      listener.UseTLS,
+			CertFile:    listener.CertFile,
+			KeyFile:     listener.KeyFile,
+		}
+
+		if err := listenerService.StartListener(profile); err != nil {
+			// Revert status if failed to start
+			listenerStorage.UpdateListenerStatus(id, false)
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+	}))).Methods("POST")
+
+	router.Handle("/api/listeners/{id}/stop", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		// Update listener status to inactive
+		if err := listenerStorage.UpdateListenerStatus(id, false); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Stop the listener service
+		if err := listenerService.StopListener(id); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
+	}))).Methods("POST")
+
+	router.Handle("/api/listeners/{id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
+
+		if r.Method == "DELETE" {
+			// Delete listener
+			if err := listenerStorage.DeleteListener(id); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+		}
+	}))).Methods("DELETE")
+
+	// Profile management endpoints (protected)
+	router.Handle("/api/profile/list", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get all profiles from config
+		profiles := []map[string]interface{}{}
+		for _, profile := range config.Profiles {
+			profiles = append(profiles, map[string]interface{}{
+				"id":          profile.ID,
+				"name":        profile.Name,
+				"projectName": profile.ProjectName,
+				"host":        profile.Host,
+				"port":        profile.Port,
+				"description": profile.Description,
+				"useTLS":      profile.UseTLS,
+				"certFile":    profile.CertFile,
+				"keyFile":     profile.KeyFile,
+				"isActive":    false, // Default to inactive
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"profiles": profiles,
+		})
+	}))).Methods("GET")
+
 	// Protected routes (example)
 	protected := router.PathPrefix("/api/protected").Subrouter()
 	protected.Use(utils.AuthMiddleware)
