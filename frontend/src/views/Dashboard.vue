@@ -649,6 +649,10 @@ interface Profile {
 
 const availableProfiles = ref<Profile[]>([])
 
+// API base URL - change this to your Linux VM's IP and port
+// If your backend is running on a different IP/port, update this value
+const API_BASE_URL = 'http://192.168.0.111:8080'
+
 // Utility function for authenticated API requests
 const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('auth_token')
@@ -661,7 +665,10 @@ const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
     headers['Authorization'] = `Bearer ${token}`
   }
   
-  const response = await fetch(url, {
+  // Prepend API base URL to relative URLs
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  
+  const response = await fetch(fullUrl, {
     ...options,
     headers
   })
@@ -1343,7 +1350,7 @@ const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
-  const eventSource = new EventSource(`/api/vnc/stream?token=${token}`)
+      const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
   
   eventSource.onmessage = (event) => {
     try {
