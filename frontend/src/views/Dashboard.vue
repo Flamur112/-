@@ -320,6 +320,10 @@
                   <el-icon><Connection /></el-icon>
                   Use Server Config
                 </el-button>
+                <el-button type="success" @click="refreshListeners">
+                  <el-icon><Refresh /></el-icon>
+                  Refresh Listeners
+                </el-button>
               </el-form-item>
             </el-form>
           </div>
@@ -906,6 +910,9 @@ const startListener = async (listener: any) => {
       vncForm.value.c2Port = String(listener.port)
     }
     ElMessage.success(`Started listener: ${listener.name}`)
+    
+    // Refresh dashboard data to update the VNC dropdown
+    await loadDashboardData()
   } catch (error) {
     console.error('Failed to start listener:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -1628,6 +1635,16 @@ const updateC2PortFromSelectedListener = () => {
     const host = selectedListener.value.host || ''
     const isBindAll = host === '0.0.0.0' || host === '::' || host === '::0' || host === '0:0:0:0'
     vncForm.value.lhost = isBindAll ? getCurrentHostname() : host
+  }
+}
+
+const refreshListeners = async () => {
+  try {
+    await loadDashboardData()
+    ElMessage.success('Listeners refreshed')
+  } catch (error) {
+    console.error('Failed to refresh listeners:', error)
+    ElMessage.error('Failed to refresh listeners')
   }
 }
 </script>

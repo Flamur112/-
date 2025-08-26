@@ -30,12 +30,12 @@ type Profile struct {
 
 // ListenerService manages C2 server listeners
 type ListenerService struct {
-	mu        sync.RWMutex
-	listeners map[string]*listenerInstance // Map of profile ID to listener instance
-	ctx       context.Context
-	cancel    context.CancelFunc
-	router    http.Handler // HTTP router for unified API mode
-	vncService *VNCService // VNC service for handling VNC connections
+	mu         sync.RWMutex
+	listeners  map[string]*listenerInstance // Map of profile ID to listener instance
+	ctx        context.Context
+	cancel     context.CancelFunc
+	router     http.Handler // HTTP router for unified API mode
+	vncService *VNCService  // VNC service for handling VNC connections
 }
 
 // listenerInstance represents a single listener instance
@@ -334,11 +334,24 @@ func (ls *ListenerService) StopAllListeners() error {
 
 // acceptConnections handles incoming connections
 func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic in acceptConnections: %v", r)
+		}
+	}()
+
 	for {
 		select {
 		case <-instance.ctx.Done():
 			return
 		default:
+			// Check if listener is still valid
+			if instance.listener == nil {
+				log.Printf("Listener is nil, stopping acceptConnections")
+				return
+			}
+
 			// Set a timeout for accepting connections
 			if tcpListener, ok := instance.listener.(*net.TCPListener); ok {
 				tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
@@ -366,7 +379,13 @@ func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
 
 // handleConnection handles an individual client connection
 func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance) {
-	defer conn.Close()
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic in handleConnection: %v", r)
+		}
+		conn.Close()
+	}()
 
 	remoteAddr := conn.RemoteAddr().String()
 
@@ -504,21 +523,21 @@ func (c *bufferedConn) Read(p []byte) (n int, err error) {
 func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 	// Use a more sophisticated detection method that doesn't consume data
 	// VNC connections typically send specific patterns
-	
+
 	// Create a buffered reader to peek at the data without consuming it
 	reader := bufio.NewReader(conn)
-	
+
 	// Peek at the first few bytes to detect VNC patterns
 	peekBytes, err := reader.Peek(8)
 	if err != nil {
 		// If we can't peek, assume it's not VNC
 		return false, conn
 	}
-	
+
 	// Check for VNC frame header pattern (4-byte length + reasonable size)
 	if len(peekBytes) >= 4 {
 		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
-		
+
 		// VNC frames are typically between 100 bytes and 1MB
 		if frameLength >= 100 && frameLength <= 1024*1024 {
 			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
@@ -526,7 +545,7 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
-	
+
 	// Check for other VNC-specific patterns
 	// Some VNC implementations send specific magic bytes or headers
 	if len(peekBytes) >= 4 {
@@ -537,7 +556,7 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
-	
+
 	return false, conn
 }
 
