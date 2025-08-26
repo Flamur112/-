@@ -73,6 +73,7 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 	vs.mu.Unlock()
 
 	log.Printf("🔍 New VNC connection established: %s from %s", connectionID, agentIP)
+	log.Printf("🔍 Total VNC connections: %d", len(vs.connections))
 
 	// Start processing frames from this connection
 	go vs.processVNCStream(vncConn)
@@ -166,6 +167,8 @@ func (vs *VNCService) GetActiveConnections() []map[string]interface{} {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 
+	log.Printf("🔍 GetActiveConnections called, total connections: %d", len(vs.connections))
+
 	var connections []map[string]interface{}
 	for _, conn := range vs.connections {
 		conn.mu.RLock()
@@ -182,6 +185,7 @@ func (vs *VNCService) GetActiveConnections() []map[string]interface{} {
 		}
 		conn.mu.RUnlock()
 		connections = append(connections, connectionInfo)
+		log.Printf("🔍 Connection %s: %s (%s) - Active: %v", conn.ID, conn.Hostname, conn.AgentIP, conn.IsActive)
 	}
 
 	return connections

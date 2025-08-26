@@ -415,9 +415,10 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 
 	// Check if this is a VNC connection by looking for VNC-specific data patterns
 	// VNC connections send 4-byte length headers followed by image data
-	if ls.detectVNCConnection(conn) {
+	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
+	if vncDetected {
 		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
-		ls.vncService.HandleVNCConnection(conn, remoteAddr)
+		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
 		return
 	}
 
@@ -488,27 +489,56 @@ func (c *httpConn) Read(p []byte) (n int, err error) {
 	return c.reader.Read(p)
 }
 
+// bufferedConn wraps a net.Conn with a buffered reader for VNC connections
+type bufferedConn struct {
+	net.Conn
+	reader *bufio.Reader
+}
+
+func (c *bufferedConn) Read(p []byte) (n int, err error) {
+	return c.reader.Read(p)
+}
+
 // detectVNCConnection detects if a connection is a VNC connection
-func (ls *ListenerService) detectVNCConnection(conn net.Conn) bool {
-	// Set a short timeout for detection
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	defer conn.SetReadDeadline(time.Time{}) // Reset timeout
-
-	// Try to read 4 bytes (VNC frame length header)
-	lengthBytes := make([]byte, 4)
-	n, err := conn.Read(lengthBytes)
-	if err != nil || n != 4 {
-		return false
+// Returns (isVNC, connection) - if VNC detected, returns a buffered connection
+func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
+	// Use a more sophisticated detection method that doesn't consume data
+	// VNC connections typically send specific patterns
+	
+	// Create a buffered reader to peek at the data without consuming it
+	reader := bufio.NewReader(conn)
+	
+	// Peek at the first few bytes to detect VNC patterns
+	peekBytes, err := reader.Peek(8)
+	if err != nil {
+		// If we can't peek, assume it's not VNC
+		return false, conn
 	}
-
-	// Check if the length is reasonable (VNC frames are typically 1KB to 1MB)
-	frameLength := binary.BigEndian.Uint32(lengthBytes)
-	if frameLength < 100 || frameLength > 1024*1024 {
-		return false
+	
+	// Check for VNC frame header pattern (4-byte length + reasonable size)
+	if len(peekBytes) >= 4 {
+		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
+		
+		// VNC frames are typically between 100 bytes and 1MB
+		if frameLength >= 100 && frameLength <= 1024*1024 {
+			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
+			// Return a buffered connection wrapper
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
 	}
-
-	// This looks like a VNC connection
-	return true
+	
+	// Check for other VNC-specific patterns
+	// Some VNC implementations send specific magic bytes or headers
+	if len(peekBytes) >= 4 {
+		// Check for common VNC magic bytes or patterns
+		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
+			log.Printf("🔍 VNC RFB header detected")
+			// Return a buffered connection wrapper
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+	}
+	
+	return false, conn
 }
 
 // handleHTTPRequest handles HTTP requests in unified mode

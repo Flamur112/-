@@ -135,6 +135,9 @@ func main() {
 	listenerService := services.NewListenerService()
 	defer listenerService.Close()
 
+	// Initialize listener storage
+	listenerStorage := services.NewListenerStorage(db)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(db)
 	profileHandler := handlers.NewProfileHandler(db, listenerService)
@@ -162,6 +165,127 @@ func main() {
 	api.Handle("/agents", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.ListAgents))).Methods("GET")
 	api.Handle("/tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.EnqueueTask))).Methods("POST")
 	api.Handle("/agent-tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.GetAgentTasks))).Methods("GET")
+
+	// Listener management endpoints (protected)
+	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		listeners, err := listenerStorage.GetAllListeners()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"listeners": listeners,
+		})
+	}))).Methods("GET")
+
+	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var listener services.StoredListener
+		if err := json.NewDecoder(r.Body).Decode(&listener); err != nil {
+			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Generate unique ID if not provided
+		if listener.ID == "" {
+			listener.ID = fmt.Sprintf("listener_%d", time.Now().Unix())
+		}
+
+		// Set timestamps
+		if listener.CreatedAt.IsZero() {
+			listener.CreatedAt = time.Now()
+		}
+		listener.UpdatedAt = time.Now()
+
+		if err := listenerStorage.SaveListener(&listener); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(listener)
+	}))).Methods("POST")
+
+	api.Handle("/listeners/{id}/start", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		listenerID := vars["id"]
+
+		// Get listener from storage
+		listener, err := listenerStorage.GetListener(listenerID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
+			return
+		}
+
+		// Start the listener
+		profile := &services.Profile{
+			ID:          listener.ID,
+			Name:        listener.Name,
+			ProjectName: listener.ProjectName,
+			Host:        listener.Host,
+			Port:        listener.Port,
+			Description: listener.Description,
+			UseTLS:      listener.UseTLS,
+			CertFile:    listener.CertFile,
+			KeyFile:     listener.KeyFile,
+		}
+
+		if err := listenerService.StartListener(profile); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Mark as active in storage
+		if err := listenerStorage.UpdateListenerStatus(listenerID, true); err != nil {
+			log.Printf("Warning: Failed to update listener status: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":  "Listener started successfully",
+			"listener": listener,
+		})
+	}))).Methods("POST")
+
+	api.Handle("/listeners/{id}/stop", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		listenerID := vars["id"]
+
+		// Stop the listener
+		if err := listenerService.StopListener(listenerID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Mark as inactive in storage
+		if err := listenerStorage.UpdateListenerStatus(listenerID, false); err != nil {
+			log.Printf("Warning: Failed to update listener status: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Listener stopped successfully",
+		})
+	}))).Methods("POST")
+
+	api.Handle("/listeners/{id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		listenerID := vars["id"]
+
+		if err := listenerStorage.DeleteListener(listenerID); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Also stop the listener if it's running
+		listenerService.StopListener(listenerID)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Listener deleted successfully",
+		})
+	}))).Methods("DELETE")
 
 	// VNC endpoints (protected)
 	api.Handle("/vnc/connections", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +322,7 @@ func main() {
 					"data":          frame.Data,
 					"size":          frame.Size,
 				}
-				
+
 				frameJSON, _ := json.Marshal(frameData)
 				fmt.Fprintf(w, "data: %s\n\n", frameJSON)
 				w.(http.Flusher).Flush()
@@ -291,38 +415,18 @@ func main() {
 		log.Println("Server is ready and listening")
 	}
 
-	// Automatically start C2 listener profiles from config
-	log.Println("🔒 Starting C2 listener profiles from configuration...")
+	// Initialize listener storage and load default profiles
+	log.Println("🔒 Initializing listener management system...")
 
-	// Check if we have profiles configured
-	if len(config.Profiles) == 0 {
-		log.Fatalf("❌ FATAL: No C2 profiles configured in config.json")
+	if err := listenerStorage.Initialize(); err != nil {
+		log.Fatalf("❌ Failed to initialize listener storage: %v", err)
 	}
 
-	// Check if at least one TLS profile is configured (this is a TLS-only system)
-	tlsProfiles := 0
+	// Load default profiles from config.json into database (but don't start them)
+	// Convert config profiles to services.Profile type
+	var defaultProfiles []services.Profile
 	for _, profileConfig := range config.Profiles {
-		if profileConfig.UseTLS {
-			tlsProfiles++
-		}
-	}
-
-	if tlsProfiles == 0 {
-		log.Fatalf("❌ FATAL: No TLS profiles configured. This system requires TLS encryption for all C2 communication.")
-	}
-
-	log.Printf("📋 Found %d profiles, %d with TLS enabled", len(config.Profiles), tlsProfiles)
-
-	// Try to start each configured profile
-	startedCount := 0
-	criticalErrors := []string{}
-
-	for _, profileConfig := range config.Profiles {
-		log.Printf("🔄 Attempting to start profile: %s (%s:%d)", profileConfig.Name, profileConfig.Host, profileConfig.Port)
-		log.Printf("📁 Profile config - UseTLS: %v, CertFile: %s, KeyFile: %s",
-			profileConfig.UseTLS, profileConfig.CertFile, profileConfig.KeyFile)
-
-		profile := &services.Profile{
+		profile := services.Profile{
 			ID:          profileConfig.ID,
 			Name:        profileConfig.Name,
 			ProjectName: profileConfig.ProjectName,
@@ -333,59 +437,63 @@ func main() {
 			CertFile:    profileConfig.CertFile,
 			KeyFile:     profileConfig.KeyFile,
 		}
+		defaultProfiles = append(defaultProfiles, profile)
+	}
 
-		log.Printf("🔍 About to call StartListener for profile: %s", profile.Name)
+	if err := listenerStorage.LoadDefaultListeners(defaultProfiles); err != nil {
+		log.Printf("⚠️  Warning: Failed to load default listeners: %v", err)
+	}
 
-		if err := listenerService.StartListener(profile); err != nil {
-			errorMsg := fmt.Sprintf("❌ FAILED to start profile '%s': %v", profileConfig.Name, err)
-			log.Printf(errorMsg)
+	// Only start listeners that are explicitly marked as active in the database
+	log.Println("🔒 Starting active C2 listeners from database...")
 
-			if profileConfig.UseTLS {
-				log.Printf("💡 TLS is enabled but certificates are missing:")
-				log.Printf("   - Cert: %s", profileConfig.CertFile)
-				log.Printf("   - Key:  %s", profileConfig.KeyFile)
+	activeListeners, err := listenerStorage.GetActiveListeners()
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to get active listeners: %v", err)
+		activeListeners = []*services.StoredListener{} // Empty slice
+	}
 
-				// Collect critical errors for TLS profiles
-				criticalErrors = append(criticalErrors, fmt.Sprintf("Profile '%s': %v", profileConfig.Name, err))
+	if len(activeListeners) == 0 {
+		log.Printf("💡 No active listeners found. Listeners must be manually started from the dashboard.")
+		log.Printf("💡 Default profiles are loaded but inactive. Use the dashboard to start them.")
+	} else {
+		log.Printf("📋 Found %d active listeners", len(activeListeners))
+
+		// Start each active listener
+		startedCount := 0
+		for _, storedListener := range activeListeners {
+			log.Printf("🔄 Starting active listener: %s (%s:%d)", storedListener.Name, storedListener.Host, storedListener.Port)
+
+			// Convert StoredListener to Profile
+			profile := &services.Profile{
+				ID:          storedListener.ID,
+				Name:        storedListener.Name,
+				ProjectName: storedListener.ProjectName,
+				Host:        storedListener.Host,
+				Port:        storedListener.Port,
+				Description: storedListener.Description,
+				UseTLS:      storedListener.UseTLS,
+				CertFile:    storedListener.CertFile,
+				KeyFile:     storedListener.KeyFile,
 			}
-		} else {
-			log.Printf("✅ Profile '%s' started successfully on %s:%d", profileConfig.Name, profileConfig.Host, profileConfig.Port)
-			if profileConfig.UseTLS {
-				log.Printf("🔒 TLS 1.3/1.2 enabled - All C2 communication is encrypted")
+
+			if err := listenerService.StartListener(profile); err != nil {
+				log.Printf("❌ Failed to start listener '%s': %v", storedListener.Name, err)
+				// Mark as inactive in database since it failed to start
+				listenerStorage.UpdateListenerStatus(storedListener.ID, false)
 			} else {
-				log.Printf("⚠️  WARNING: Profile '%s' is NOT using TLS (plain TCP)", profileConfig.Name)
+				log.Printf("✅ Listener '%s' started successfully on %s:%d", storedListener.Name, storedListener.Host, storedListener.Port)
+				if storedListener.UseTLS {
+					log.Printf("🔒 TLS 1.3/1.2 enabled - All C2 communication is encrypted")
+				}
+				startedCount++
 			}
-			startedCount++
-		}
-	}
-
-	// CRITICAL: If no listeners started or TLS profiles failed, exit
-	if startedCount == 0 {
-		log.Printf("")
-		log.Printf("🚨 CRITICAL ERROR: NO C2 listeners were started successfully!")
-		log.Printf("🚨 The server cannot function without active C2 listeners!")
-		log.Printf("")
-
-		if len(criticalErrors) > 0 {
-			log.Printf("❌ TLS Certificate Errors:")
-			for _, err := range criticalErrors {
-				log.Printf("   - %s", err)
-			}
-			log.Printf("")
 		}
 
-		log.Printf("💡 To fix this issue:")
-		log.Printf("   1. Generate TLS certificates: .\\generate-certs.ps1")
-		log.Printf("   2. Ensure certificate files exist in the specified paths")
-		log.Printf("   3. Check your config.json profile configuration")
-		log.Printf("   4. Restart the server")
-		log.Printf("")
-		log.Printf("🚨 EXITING: Server cannot run without C2 listeners")
-		os.Exit(1)
+		log.Printf("✅ Successfully started %d active listener(s)", startedCount)
 	}
 
-	log.Printf("✅ Successfully started %d C2 listener(s)", startedCount)
-	log.Printf("🔒 MuliC2 server is now ready with TLS encryption")
+	log.Printf("🔒 MuliC2 server is ready. Use the dashboard to manage listeners.")
 
 	// Start background agent status monitoring
 	go monitorAgentStatus(db)
