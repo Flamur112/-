@@ -270,13 +270,10 @@
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="LHOST (Your IP):">
-                    <el-input v-model="vncForm.lhost" placeholder="192.168.1.100" />
-                    <span class="form-help">Your server's IP address</span>
+                    <el-input :model-value="vncForm.lhost" disabled placeholder="Auto from selected HTTPS listener" />
+                    <span class="form-help">Auto-detected from selected HTTPS listener</span>
                   </el-form-item>
                 </el-col>
-              </el-row>
-              
-              <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="C2 Port:">
                     <el-select v-model="selectedListenerId" placeholder="Select active HTTPS listener" style="width: 100%">
@@ -1018,7 +1015,7 @@ const generateVncPayload = async () => {
   
   try {
     // Use the LHOST as the C2 server and get the C2 port from the form
-    const c2Host = vncForm.value.lhost
+    const c2Host = selectedListener.value ? selectedListener.value.host : vncForm.value.lhost
     const c2Port = vncForm.value.c2Port || (activeTLSProfile.value ? String(activeTLSProfile.value.port) : '443')
     
     console.log('VNC Configuration:', { c2Host, c2Port })
@@ -1607,6 +1604,7 @@ const selectedListener = computed<Listener | undefined>(() => {
 const updateC2PortFromSelectedListener = () => {
   if (selectedListener.value) {
     vncForm.value.c2Port = String(selectedListener.value.port)
+    vncForm.value.lhost = selectedListener.value.host || (window.location.hostname || 'localhost')
   }
 }
 </script>
