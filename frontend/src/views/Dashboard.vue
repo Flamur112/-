@@ -274,12 +274,6 @@
                     <span class="form-help">Your server's IP address</span>
                   </el-form-item>
                 </el-col>
-                <el-col :span="12">
-                  <el-form-item label="LPORT (VNC Port):">
-                    <el-input v-model="vncForm.lport" placeholder="5900" />
-                    <span class="form-help">Port for VNC connection (default: 5900)</span>
-                  </el-form-item>
-                </el-col>
               </el-row>
               
               <el-row :gutter="20">
@@ -330,7 +324,6 @@
             <h3>Generated VNC Payload:</h3>
             <div class="vnc-info">
               <p><strong>LHOST:</strong> {{ vncForm.lhost }}</p>
-              <p><strong>LPORT:</strong> {{ vncForm.lport }}</p>
               <p><strong>C2 Port:</strong> {{ vncForm.c2Port }}</p>
               <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
               <p><strong>Loader:</strong> {{ vncForm.useLoader ? 'Enabled' : 'Disabled' }}</p>
@@ -599,7 +592,6 @@ const creatingListener = ref(false)
 // VNC Payload Generator
 const vncForm = ref({
   lhost: '',
-  lport: '5900', // VNC target port (this is correct)
   c2Port: '', // Auto-detected C2 server port (blank until detected)
   payloadType: 'powershell',
   useLoader: true
@@ -1012,8 +1004,8 @@ const generateVncPayload = async () => {
     return
   }
 
-  if (!vncForm.value.lhost || !vncForm.value.lport) {
-    ElMessage.error('Please provide LHOST and VNC LPORT')
+  if (!vncForm.value.lhost) {
+    ElMessage.error('Please provide LHOST')
     return
   }
   
@@ -1023,14 +1015,12 @@ const generateVncPayload = async () => {
     // Use the LHOST as the C2 server and get the C2 port from the form
     const c2Host = vncForm.value.lhost
     const c2Port = vncForm.value.c2Port || (activeTLSProfile.value ? String(activeTLSProfile.value.port) : '443')
-    const vncPort = vncForm.value.lport
     
-    console.log('VNC Configuration:', { c2Host, c2Port, vncPort })
+    console.log('VNC Configuration:', { c2Host, c2Port })
     
     let payload = `# MuliC2 VNC Screen Capture Agent
 # C2 Host: ${c2Host}
 # C2 Port: ${c2Port}
-# VNC Target: ${c2Host}:${vncPort}
 # Type: ${vncForm.value.payloadType}
 # Loader: ${vncForm.value.useLoader ? 'Enabled' : 'Disabled'}
 # Generated: ${new Date().toLocaleString()}
@@ -1461,7 +1451,6 @@ const toggleFullscreen = () => {
 const clearVncForm = () => {
   vncForm.value = {
     lhost: '',
-    lport: '5900',
     c2Port: '', // Auto-detected C2 server port
     payloadType: 'powershell',
     useLoader: true
@@ -1475,7 +1464,6 @@ const autoFillVncFromConfig = () => {
   
   if (activeProfile) {
     vncForm.value.lhost = window.location.hostname || 'localhost'
-    vncForm.value.lport = '5900' // Default VNC port
     vncForm.value.c2Port = activeProfile.port.toString() // Set C2 port from profile
     ElMessage.success(`Auto-filled using ${activeProfile.name} (Port: ${activeProfile.port})`)
   } else {
@@ -1497,7 +1485,7 @@ const downloadVncPayload = () => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `vnc_payload_${vncForm.value.lhost}_${vncForm.value.lport}.ps1`
+  a.download = `vnc_payload_${vncForm.value.lhost}_${vncForm.value.c2Port}.ps1`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
