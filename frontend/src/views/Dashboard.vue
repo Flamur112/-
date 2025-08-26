@@ -478,35 +478,21 @@
     <!-- Create Listener Dialog -->
     <el-dialog v-model="listenerDialogVisible" title="Create New Listener" width="500px">
       <el-form :model="listenerForm" label-width="120px">
-        <el-form-item label="From Profile:">
-          <el-select v-model="selectedProfileId" placeholder="Select profile to autofill" filterable style="width: 100%">
-            <el-option
-              v-for="p in availableProfiles"
-              :key="p.id"
-              :label="`${p.name} (${p.host}:${p.port})${p.useTLS ? ' [HTTPS]' : ''}`"
-              :value="p.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="Manual Override:">
-          <el-switch v-model="listenerFormManual" />
-          <span class="form-help">Enable to edit host/port/protocol manually</span>
-        </el-form-item>
         <el-form-item label="Profile Name:">
           <el-input v-model="listenerForm.name" placeholder="Enter profile name" />
         </el-form-item>
         <el-form-item label="Protocol:">
-          <el-select v-model="listenerForm.protocol" placeholder="Select protocol" :disabled="!listenerFormManual">
+          <el-select v-model="listenerForm.protocol" placeholder="Select protocol">
             <el-option label="TCP" value="tcp" />
             <el-option label="HTTP" value="http" />
             <el-option label="HTTPS" value="https" />
           </el-select>
         </el-form-item>
         <el-form-item label="Host:">
-          <el-input v-model="listenerForm.host" placeholder="0.0.0.0" :disabled="!listenerFormManual" />
+          <el-input v-model="listenerForm.host" placeholder="0.0.0.0" />
         </el-form-item>
         <el-form-item label="Port:">
-          <el-input v-model="listenerForm.port" placeholder="8080" :disabled="!listenerFormManual" />
+          <el-input v-model="listenerForm.port" placeholder="8080" />
         </el-form-item>
         <el-form-item label="Description:">
           <el-input
@@ -608,8 +594,6 @@ const listenerForm = ref({
   port: '8080',
   description: ''
 })
-const selectedProfileId = ref<string>('')
-const listenerFormManual = ref(false)
 const creatingListener = ref(false)
 
 // VNC Payload Generator
@@ -850,9 +834,6 @@ const cancelTask = async (task: any) => {
 
 const showCreateListenerDialog = () => {
   listenerDialogVisible.value = true
-  if (availableProfiles.value.length === 0) {
-    loadProfiles()
-  }
 }
 
 const createListener = async () => {
@@ -874,17 +855,6 @@ const createListener = async () => {
   creatingListener.value = true
   
   try {
-    // If a profile is selected and manual override is off, auto-fill from profile
-    if (selectedProfileId.value && !listenerFormManual.value) {
-      const prof = availableProfiles.value.find(p => p.id === selectedProfileId.value)
-      if (prof) {
-        listenerForm.value.host = prof.host
-        listenerForm.value.port = String(prof.port)
-        listenerForm.value.protocol = prof.useTLS ? 'https' : 'tcp'
-        if (!listenerForm.value.name) listenerForm.value.name = prof.name
-        if (!listenerForm.value.description) listenerForm.value.description = prof.description || ''
-      }
-    }
     // Create listener via API
     const response = await authenticatedFetch('/api/listeners', {
       method: 'POST',
@@ -911,8 +881,6 @@ const createListener = async () => {
     ElMessage.success('Listener created successfully')
     listenerDialogVisible.value = false
     listenerForm.value = { name: '', protocol: 'tcp', host: '0.0.0.0', port: '8080', description: '' }
-    selectedProfileId.value = ''
-    listenerFormManual.value = false
   } catch (error) {
     console.error('Failed to create listener:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -1037,6 +1005,11 @@ const generateVncPayload = async () => {
   setPortFromActiveListener()
   if (!activeTLSListener.value) {
     setPortFromActiveProfile()
+  }
+
+  if (!activeTLSListener.value) {
+    ElMessage.error('No HTTPS listener active. Start an HTTPS listener to generate a VNC payload.')
+    return
   }
 
   if (!vncForm.value.lhost || !vncForm.value.lport) {
