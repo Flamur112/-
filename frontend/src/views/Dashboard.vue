@@ -285,8 +285,8 @@
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="C2 Port:">
-                    <el-input v-model="vncForm.c2Port" placeholder="443" />
-                    <span class="form-help">C2 server port (default: 443)</span>
+                    <el-input v-model="vncForm.c2Port" :disabled="true" placeholder="Auto from active TLS profile" />
+                    <span class="form-help">Auto-detected from active TLS profile</span>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -990,8 +990,11 @@ const disconnectAgent = async (agent: any) => {
 
 // VNC Payload Generator Functions
 const generateVncPayload = async () => {
-  if (!vncForm.value.lhost || !vncForm.value.lport || !vncForm.value.c2Port) {
-    ElMessage.error('Please provide LHOST, LPORT, and C2 Port')
+  // Ensure C2 port is auto-detected
+  setPortFromActiveProfile()
+
+  if (!vncForm.value.lhost || !vncForm.value.lport) {
+    ElMessage.error('Please provide LHOST and VNC LPORT')
     return
   }
   
@@ -1000,7 +1003,7 @@ const generateVncPayload = async () => {
   try {
     // Use the LHOST as the C2 server and get the C2 port from the form
     const c2Host = vncForm.value.lhost
-    const c2Port = vncForm.value.c2Port || 443 // Use form value or default to 443
+    const c2Port = activeTLSProfile.value ? String(activeTLSProfile.value.port) : (vncForm.value.c2Port || '443')
     const vncPort = vncForm.value.lport
     
     console.log('VNC Configuration:', { c2Host, c2Port, vncPort })
@@ -1545,6 +1548,20 @@ const loadDashboardData = async () => {
     updateStats()
   } catch (error) {
     console.error('Failed to load dashboard data:', error)
+  }
+}
+
+const activeTLSProfile = computed<Profile | undefined>(() => {
+  return (
+    availableProfiles.value.find(p => p.isActive && p.useTLS) ||
+    availableProfiles.value.find(p => p.useTLS) ||
+    availableProfiles.value[0]
+  )
+})
+
+const setPortFromActiveProfile = () => {
+  if (activeTLSProfile.value) {
+    vncForm.value.c2Port = String(activeTLSProfile.value.port)
   }
 }
 </script>
