@@ -859,9 +859,9 @@ const createListener = async () => {
     const response = await authenticatedFetch('/api/listeners', {
       method: 'POST',
       body: JSON.stringify({
-        name: listenerForm.value.name,
+      name: listenerForm.value.name,
         projectName: 'MuliC2',
-        host: listenerForm.value.host,
+      host: listenerForm.value.host,
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
         useTLS: listenerForm.value.protocol === 'tls',

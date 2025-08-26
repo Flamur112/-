@@ -148,8 +148,9 @@ func main() {
 	router := mux.NewRouter()
 	api := router.PathPrefix("/api").Subrouter()
 
-	// CORS middleware
+	// CORS middleware - apply to both main router and API subrouter
 	router.Use(corsMiddleware)
+	api.Use(corsMiddleware)
 
 	// Register routes under /api
 	authHandler.RegisterRoutes(api)
@@ -168,57 +169,57 @@ func main() {
 
 	// Listener management endpoints (protected)
 	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		listeners, err := listenerStorage.GetAllListeners()
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"listeners": listeners,
-		})
-	}))).Methods("GET")
-
-	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var listener services.StoredListener
-		if err := json.NewDecoder(r.Body).Decode(&listener); err != nil {
-			http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		// Generate unique ID if not provided
-		if listener.ID == "" {
+		switch r.Method {
+		case "GET":
+			// List all listeners
+			listeners, err := listenerStorage.GetAllListeners()
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"listeners": listeners,
+			})
+		case "POST":
+			// Create new listener
+			var listener services.StoredListener
+			if err := json.NewDecoder(r.Body).Decode(&listener); err != nil {
+				http.Error(w, "Invalid request body", http.StatusBadRequest)
+				return
+			}
 			listener.ID = fmt.Sprintf("listener_%d", time.Now().Unix())
-		}
-
-		// Set timestamps
-		if listener.CreatedAt.IsZero() {
 			listener.CreatedAt = time.Now()
+			listener.UpdatedAt = time.Now()
+
+			if err := listenerStorage.SaveListener(&listener); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(listener)
 		}
-		listener.UpdatedAt = time.Now()
+	}))).Methods("GET", "POST")
 
-		if err := listenerStorage.SaveListener(&listener); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(listener)
-	}))).Methods("POST")
-
+	// Listener start/stop endpoints
 	api.Handle("/listeners/{id}/start", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		listenerID := vars["id"]
+		id := vars["id"]
 
-		// Get listener from storage
-		listener, err := listenerStorage.GetListener(listenerID)
+		// Update listener status to active
+		if err := listenerStorage.UpdateListenerStatus(id, true); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Get listener details and start it
+		listener, err := listenerStorage.GetListener(id)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
 			return
 		}
 
-		// Start the listener
+		// Convert to Profile and start
 		profile := &services.Profile{
 			ID:          listener.ID,
 			Name:        listener.Name,
@@ -232,60 +233,75 @@ func main() {
 		}
 
 		if err := listenerService.StartListener(profile); err != nil {
+			// Revert status if failed to start
+			listenerStorage.UpdateListenerStatus(id, false)
 			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Mark as active in storage
-		if err := listenerStorage.UpdateListenerStatus(listenerID, true); err != nil {
-			log.Printf("Warning: Failed to update listener status: %v", err)
-		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message":  "Listener started successfully",
-			"listener": listener,
-		})
+		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 	}))).Methods("POST")
 
 	api.Handle("/listeners/{id}/stop", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		listenerID := vars["id"]
+		id := vars["id"]
 
-		// Stop the listener
-		if err := listenerService.StopListener(listenerID); err != nil {
+		// Update listener status to inactive
+		if err := listenerStorage.UpdateListenerStatus(id, false); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Mark as inactive in storage
-		if err := listenerStorage.UpdateListenerStatus(listenerID, false); err != nil {
-			log.Printf("Warning: Failed to update listener status: %v", err)
+		// Stop the listener service
+		if err := listenerService.StopListener(id); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
+			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Listener stopped successfully",
-		})
+		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
 	}))).Methods("POST")
 
 	api.Handle("/listeners/{id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		listenerID := vars["id"]
+		id := vars["id"]
 
-		if err := listenerStorage.DeleteListener(listenerID); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusInternalServerError)
-			return
+		if r.Method == "DELETE" {
+			// Delete listener
+			if err := listenerStorage.DeleteListener(id); err != nil {
+				http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 		}
+	}))).Methods("DELETE")
 
-		// Also stop the listener if it's running
-		listenerService.StopListener(listenerID)
+	// Profile management endpoints (protected)
+	api.Handle("/profile/list", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get all profiles from config
+		profiles := []map[string]interface{}{}
+		for _, profile := range config.Profiles {
+			profiles = append(profiles, map[string]interface{}{
+				"id":          profile.ID,
+				"name":        profile.Name,
+				"projectName": profile.ProjectName,
+				"host":        profile.Host,
+				"port":        profile.Port,
+				"description": profile.Description,
+				"useTLS":      profile.UseTLS,
+				"certFile":    profile.CertFile,
+				"keyFile":     profile.KeyFile,
+				"isActive":    false, // Default to inactive
+			})
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Listener deleted successfully",
+			"profiles": profiles,
 		})
-	}))).Methods("DELETE")
+	}))).Methods("GET")
 
 	// VNC endpoints (protected)
 	api.Handle("/vnc/connections", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -339,151 +355,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "healthy", "service": "mulic2"}`))
-	}).Methods("GET")
-
-	// Listener management endpoints (protected)
-	router.Handle("/api/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case "GET":
-			// List all listeners
-			listeners, err := listenerStorage.GetAllListeners()
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"listeners": listeners,
-			})
-		case "POST":
-			// Create new listener
-			var listener services.StoredListener
-			if err := json.NewDecoder(r.Body).Decode(&listener); err != nil {
-				http.Error(w, "Invalid request body", http.StatusBadRequest)
-				return
-			}
-			listener.ID = fmt.Sprintf("listener_%d", time.Now().Unix())
-			listener.CreatedAt = time.Now()
-			listener.UpdatedAt = time.Now()
-
-			if err := listenerStorage.SaveListener(&listener); err != nil {
-				http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(listener)
-		}
-	}))).Methods("GET", "POST")
-
-	// Listener start/stop endpoints
-	router.Handle("/api/listeners/{id}/start", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-
-		// Update listener status to active
-		if err := listenerStorage.UpdateListenerStatus(id, true); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Get listener details and start it
-		listener, err := listenerStorage.GetListener(id)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
-			return
-		}
-
-		// Convert to Profile and start
-		profile := &services.Profile{
-			ID:          listener.ID,
-			Name:        listener.Name,
-			ProjectName: listener.ProjectName,
-			Host:        listener.Host,
-			Port:        listener.Port,
-			Description: listener.Description,
-			UseTLS:      listener.UseTLS,
-			CertFile:    listener.CertFile,
-			KeyFile:     listener.KeyFile,
-		}
-
-		if err := listenerService.StartListener(profile); err != nil {
-			// Revert status if failed to start
-			listenerStorage.UpdateListenerStatus(id, false)
-			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
-	}))).Methods("POST")
-
-	router.Handle("/api/listeners/{id}/stop", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-
-		// Update listener status to inactive
-		if err := listenerStorage.UpdateListenerStatus(id, false); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Stop the listener service
-		if err := listenerService.StopListener(id); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
-	}))).Methods("POST")
-
-	router.Handle("/api/listeners/{id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-
-		if r.Method == "DELETE" {
-			// Delete listener
-			if err := listenerStorage.DeleteListener(id); err != nil {
-				http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
-		}
-	}))).Methods("DELETE")
-
-	// Profile management endpoints (protected)
-	router.Handle("/api/profile/list", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get all profiles from config
-		profiles := []map[string]interface{}{}
-		for _, profile := range config.Profiles {
-			profiles = append(profiles, map[string]interface{}{
-				"id":          profile.ID,
-				"name":        profile.Name,
-				"projectName": profile.ProjectName,
-				"host":        profile.Host,
-				"port":        profile.Port,
-				"description": profile.Description,
-				"useTLS":      profile.UseTLS,
-				"certFile":    profile.CertFile,
-				"keyFile":     profile.KeyFile,
-				"isActive":    false, // Default to inactive
-			})
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"profiles": profiles,
-		})
-	}))).Methods("GET")
-
-	// Protected routes (example)
-	protected := router.PathPrefix("/api/protected").Subrouter()
-	protected.Use(utils.AuthMiddleware)
-	protected.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message": "Access granted to protected resource"}`))
 	}).Methods("GET")
 
 	// Set router for unified API mode
@@ -748,10 +619,8 @@ func createTables(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
 			username VARCHAR(255) UNIQUE NOT NULL,
-			email VARCHAR(255),
 			password_hash VARCHAR(255) NOT NULL,
-			role VARCHAR(50) DEFAULT 'user',
-			is_active BOOLEAN DEFAULT true,
+			email VARCHAR(255),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			last_login TIMESTAMP
 		)
@@ -760,26 +629,25 @@ func createTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create users table: %w", err)
 	}
 
-	// Agents table
+	// Create agents table with PostgreSQL syntax
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS agents (
 			id SERIAL PRIMARY KEY,
+			agent_id VARCHAR(255) UNIQUE NOT NULL,
 			hostname VARCHAR(255),
+			ip_address VARCHAR(45),
 			username VARCHAR(255),
-			ip VARCHAR(64),
-			os VARCHAR(128),
-			arch VARCHAR(64),
-			profile_id VARCHAR(128),
-			status VARCHAR(32) DEFAULT 'online',
-			first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			os_info VARCHAR(255),
+			status VARCHAR(32) DEFAULT 'offline',
+			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to create agents table: %w", err)
 	}
 
-	// Tasks table
+	// Create tasks table with PostgreSQL syntax
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS tasks (
 			id SERIAL PRIMARY KEY,
