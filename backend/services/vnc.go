@@ -91,7 +91,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 	}()
 
 	for vncConn.IsActive {
-		// Set generous read timeout for each frame
+		// Set a generous read timeout for each frame
 		vncConn.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 		// Read frame length (4 bytes)
@@ -100,14 +100,14 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				log.Printf("🔍 VNC client closed connection: %s", vncConn.ID)
-			} else {
-				log.Printf("🔍 Error reading frame length from %s: %v", vncConn.ID, err)
+				break
 			}
-			break
+			log.Printf("🔍 Error reading frame length from %s: %v", vncConn.ID, err)
+			continue // Don't break, just skip this frame
 		}
 		if n != 4 {
 			log.Printf("🔍 Incomplete frame length read from %s: got %d bytes, expected 4", vncConn.ID, n)
-			break
+			continue
 		}
 
 		frameLength := binary.LittleEndian.Uint32(lengthBytes)
@@ -126,6 +126,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 				log.Printf("🔍 VNC agent requested termination: %s", vncConn.ID)
 				break
 			}
+			continue
 		}
 
 		// Read frame data
@@ -134,14 +135,14 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				log.Printf("🔍 VNC client closed connection while reading frame data: %s", vncConn.ID)
-			} else {
-				log.Printf("🔍 Error reading frame data from %s: %v", vncConn.ID, err)
+				break
 			}
-			break
+			log.Printf("🔍 Error reading frame data from %s: %v", vncConn.ID, err)
+			continue
 		}
 		if n != int(frameLength) {
 			log.Printf("🔍 Incomplete frame data read from %s: got %d bytes, expected %d", vncConn.ID, n, frameLength)
-			break
+			continue
 		}
 
 		// Update connection stats
