@@ -569,29 +569,8 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			// Return a buffered connection wrapper
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
-	}
 
-	// Check for other VNC-specific patterns
-	// Some VNC implementations send specific magic bytes or headers
-	if len(peekBytes) >= 4 {
-		// Check for common VNC magic bytes or patterns
-		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
-			log.Printf("🔍 VNC RFB header detected")
-			// Return a buffered connection wrapper
-			return true, &bufferedConn{Conn: conn, reader: reader}
-		}
-	}
-
-	// Check for PowerShell VNC payload pattern (4-byte length header)
-	// This is what your PowerShell script sends
-	if len(peekBytes) >= 4 {
-		// Check both endianness for PowerShell VNC
-		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
-		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
-
-		log.Printf("🔍 DEBUG: PowerShell VNC check - BE: %d, LE: %d", frameLengthBE, frameLengthLE)
-
-		// PowerShell VNC sends JPEG frames, typically 1KB to 50KB
+		// Check for PowerShell VNC specifically (JPEG frames, typically 1KB to 50KB)
 		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
 			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
 
@@ -603,6 +582,17 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			}
 
 			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+	}
+
+	// Check for other VNC-specific patterns
+	// Some VNC implementations send specific magic bytes or headers
+	if len(peekBytes) >= 4 {
+		// Check for common VNC magic bytes or patterns
+		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
+			log.Printf("🔍 VNC RFB header detected")
+			// Return a buffered connection wrapper
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
