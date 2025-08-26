@@ -412,7 +412,7 @@ func main() {
 			log.Printf("Server starting on port %s...", apiPort)
 			addr := ":" + apiPort
 			log.Printf("Binding to address: %s", addr)
-			if err := http.ListenAndServe(addr, router); err != nil {
+			if err := http.ListenAndServe(addr, withGlobalCORS(router)); err != nil {
 				log.Printf("Server error: %v", err)
 			}
 		}()
@@ -745,5 +745,22 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+// withGlobalCORS ensures CORS headers are added for all responses,
+// including preflight and non-matching routes
+func withGlobalCORS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		h.ServeHTTP(w, r)
 	})
 }
