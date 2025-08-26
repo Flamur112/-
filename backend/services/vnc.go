@@ -11,17 +11,17 @@ import (
 
 // VNCConnection represents a VNC connection from an agent
 type VNCConnection struct {
-	ID           string
-	AgentIP      string
-	Hostname     string
-	Resolution   string
-	FPS          int
-	ConnectedAt  time.Time
-	LastFrame    time.Time
-	FrameCount   int
-	IsActive     bool
-	conn         net.Conn
-	mu           sync.RWMutex
+	ID          string
+	AgentIP     string
+	Hostname    string
+	Resolution  string
+	FPS         int
+	ConnectedAt time.Time
+	LastFrame   time.Time
+	FrameCount  int
+	IsActive    bool
+	conn        net.Conn
+	mu          sync.RWMutex
 }
 
 // VNCFrame represents a single VNC frame
@@ -53,7 +53,7 @@ func NewVNCService() *VNCService {
 // HandleVNCConnection processes a new VNC connection
 func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 	connectionID := fmt.Sprintf("vnc_%s_%d", agentIP, time.Now().Unix())
-	
+
 	vncConn := &VNCConnection{
 		ID:          connectionID,
 		AgentIP:     agentIP,
@@ -102,8 +102,8 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			break
 		}
 
-		// Parse frame length
-		frameLength := binary.BigEndian.Uint32(lengthBytes)
+		// Parse frame length - PowerShell VNC sends little-endian
+		frameLength := binary.LittleEndian.Uint32(lengthBytes)
 		if frameLength > 1024*1024 { // Max 1MB frame
 			log.Printf("🔍 Frame too large from %s: %d bytes", vncConn.ID, frameLength)
 			continue
@@ -146,7 +146,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		// Send frame to frontend (non-blocking)
 		select {
 		case vs.frameChannel <- frame:
-			log.Printf("🔍 Frame #%d sent to frontend from %s (Size: %d bytes)", 
+			log.Printf("🔍 Frame #%d sent to frontend from %s (Size: %d bytes)",
 				vncConn.FrameCount, vncConn.ID, frame.Size)
 		default:
 			log.Printf("🔍 Frame buffer full, dropping frame from %s", vncConn.ID)
