@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -79,7 +80,7 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 	go vs.processVNCStream(vncConn)
 }
 
-// processVNCStream processes the incoming VNC stream
+// processVNCStream processes the incoming VNC stream with robust error handling
 func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 	defer func() {
 		// Cleanup when connection closes
@@ -94,36 +95,61 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 	vncConn.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	for vncConn.IsActive {
-		// Read frame length (4 bytes)
+		// Read frame length (4 bytes) with proper error handling
 		lengthBytes := make([]byte, 4)
-		_, err := vncConn.conn.Read(lengthBytes)
+		n, err := io.ReadFull(vncConn.conn, lengthBytes)
 		if err != nil {
-			log.Printf("🔍 Error reading frame length from %s: %v", vncConn.ID, err)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				log.Printf("🔍 VNC connection closed by client: %s", vncConn.ID)
+			} else {
+				log.Printf("🔍 Error reading frame length from %s: %v", vncConn.ID, err)
+			}
+			break
+		}
+		if n != 4 {
+			log.Printf("🔍 Incomplete frame length read from %s: got %d bytes, expected 4", vncConn.ID, n)
 			break
 		}
 
-		// Parse frame length - PowerShell VNC sends little-endian
+		// Debug: Show raw bytes and both interpretations
+		log.Printf("🔍 DEBUG: Raw frame length bytes: %v (hex: %x)", lengthBytes, lengthBytes)
+		frameLengthBE := binary.BigEndian.Uint32(lengthBytes)
+		frameLengthLE := binary.LittleEndian.Uint32(lengthBytes)
+		log.Printf("🔍 DEBUG: Frame length BE: %d, LE: %d", frameLengthBE, frameLengthLE)
+
+		// PowerShell VNC sends little-endian frame lengths
 		frameLength := binary.LittleEndian.Uint32(lengthBytes)
-		if frameLength > 1024*1024 { // Max 1MB frame
-			log.Printf("🔍 Frame too large from %s: %d bytes", vncConn.ID, frameLength)
+		log.Printf("🔍 DEBUG: Using little-endian frame length: %d bytes", frameLength)
+
+		// Validate frame length (PowerShell VNC sends JPEG frames, typically 1KB to 50KB)
+		if frameLength < 100 || frameLength > 1024*100 { // Max 100KB frame
+			log.Printf("🔍 Invalid frame length from %s: %d bytes (expected 100B-100KB)", vncConn.ID, frameLength)
 			continue
 		}
 
 		// Check for termination signal
 		if frameLength == 9 { // "TERMINATE" is 9 bytes
 			terminationBytes := make([]byte, 9)
-			_, err := vncConn.conn.Read(terminationBytes)
+			_, err := io.ReadFull(vncConn.conn, terminationBytes)
 			if err == nil && string(terminationBytes) == "TERMINATE" {
 				log.Printf("🔍 VNC agent requested termination: %s", vncConn.ID)
 				break
 			}
 		}
 
-		// Read frame data
+		// Read frame data with proper error handling
 		frameData := make([]byte, frameLength)
-		_, err = vncConn.conn.Read(frameData)
+		n, err = io.ReadFull(vncConn.conn, frameData)
 		if err != nil {
-			log.Printf("🔍 Error reading frame data from %s: %v", vncConn.ID, err)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				log.Printf("🔍 VNC connection closed while reading frame data: %s", vncConn.ID)
+			} else {
+				log.Printf("🔍 Error reading frame data from %s: %v", vncConn.ID, err)
+			}
+			break
+		}
+		if n != int(frameLength) {
+			log.Printf("🔍 Incomplete frame data read from %s: got %d bytes, expected %d", vncConn.ID, n, frameLength)
 			break
 		}
 
