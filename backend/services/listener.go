@@ -543,11 +543,28 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 
 	// Check for VNC frame header pattern (4-byte length + reasonable size)
 	if len(peekBytes) >= 4 {
-		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
-		log.Printf("🔍 DEBUG: Frame length detected: %d bytes", frameLength)
+		// Try big-endian first
+		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
+		log.Printf("🔍 DEBUG: Frame length (big-endian): %d bytes", frameLengthBE)
 
-		// VNC frames are typically between 100 bytes and 1MB
-		if frameLength >= 100 && frameLength <= 1024*1024 {
+		// Try little-endian (PowerShell might send this)
+		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
+		log.Printf("🔍 DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
+
+		// Check if either endianness gives a reasonable frame size
+		if (frameLengthBE >= 100 && frameLengthBE <= 1024*1024) ||
+			(frameLengthLE >= 100 && frameLengthLE <= 1024*1024) {
+
+			// Use the more reasonable length
+			var frameLength uint32
+			if frameLengthBE >= 100 && frameLengthBE <= 1024*1024 {
+				frameLength = frameLengthBE
+				log.Printf("🔍 DEBUG: Using big-endian frame length: %d", frameLength)
+			} else {
+				frameLength = frameLengthLE
+				log.Printf("🔍 DEBUG: Using little-endian frame length: %d", frameLength)
+			}
+
 			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
 			// Return a buffered connection wrapper
 			return true, &bufferedConn{Conn: conn, reader: reader}
@@ -568,10 +585,23 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 	// Check for PowerShell VNC payload pattern (4-byte length header)
 	// This is what your PowerShell script sends
 	if len(peekBytes) >= 4 {
-		frameLength := binary.BigEndian.Uint32(peekBytes[:4])
+		// Check both endianness for PowerShell VNC
+		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
+		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
+
+		log.Printf("🔍 DEBUG: PowerShell VNC check - BE: %d, LE: %d", frameLengthBE, frameLengthLE)
 
 		// PowerShell VNC sends JPEG frames, typically 1KB to 50KB
-		if frameLength >= 1024 && frameLength <= 1024*50 {
+		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
+			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
+
+			var frameLength uint32
+			if frameLengthBE >= 1024 && frameLengthBE <= 1024*50 {
+				frameLength = frameLengthBE
+			} else {
+				frameLength = frameLengthLE
+			}
+
 			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
