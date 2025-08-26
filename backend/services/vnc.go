@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -181,6 +182,17 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		}
 
 		log.Printf("🔍 DEBUG: Frame #%d processed successfully, waiting for next frame...", vncConn.FrameCount)
+
+		// Check connection state before continuing
+		if tlsConn, ok := vncConn.conn.(*tls.Conn); ok {
+			state := tlsConn.ConnectionState()
+			if !state.HandshakeComplete {
+				log.Printf("🔍 DEBUG: TLS handshake incomplete, connection may be corrupted")
+				break
+			}
+			log.Printf("🔍 DEBUG: TLS connection state: HandshakeComplete=%v, Version=%s",
+				state.HandshakeComplete, tlsVersionString(state.Version))
+		}
 
 		// Reset read timeout - be more lenient with timeouts
 		vncConn.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
