@@ -270,8 +270,8 @@
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="LHOST (Your IP):">
-                    <el-input :model-value="vncForm.lhost" disabled placeholder="Auto from selected HTTPS listener" />
-                    <span class="form-help">Auto-detected from selected HTTPS listener</span>
+                    <el-input v-model="vncForm.lhost" placeholder="e.g., 192.168.0.111 or dns-name" />
+                    <span class="form-help">Defaults to selected listener host; override if it's 0.0.0.0</span>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
@@ -1604,7 +1604,9 @@ const selectedListener = computed<Listener | undefined>(() => {
 const updateC2PortFromSelectedListener = () => {
   if (selectedListener.value) {
     vncForm.value.c2Port = String(selectedListener.value.port)
-    vncForm.value.lhost = selectedListener.value.host || (window.location.hostname || 'localhost')
+    const host = selectedListener.value.host || ''
+    const isBindAll = host === '0.0.0.0' || host === '::' || host === '::0' || host === '0:0:0:0'
+    vncForm.value.lhost = isBindAll ? (window.location.hostname || 'localhost') : host
   }
 }
 </script>
