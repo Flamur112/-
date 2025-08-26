@@ -863,8 +863,8 @@ const createListener = async () => {
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
         useTLS: listenerForm.value.protocol === 'https',
-        certFile: listenerForm.value.protocol === 'tls' ? '../server.crt' : '',
-        keyFile: listenerForm.value.protocol === 'tls' ? '../server.key' : '',
+        certFile: listenerForm.value.protocol === 'https' ? '../server.crt' : '',
+        keyFile: listenerForm.value.protocol === 'https' ? '../server.key' : '',
         isActive: false
       })
     })
