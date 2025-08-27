@@ -18,17 +18,15 @@ import (
 
 // Profile represents a server profile configuration
 type Profile struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	ProjectName       string `json:"projectName"`
-	Host              string `json:"host"`
-	Port              int    `json:"port"`
-	Description       string `json:"description"`
-	UseTLS            bool   `json:"useTLS"`
-	CertFile          string `json:"certFile"`
-	KeyFile           string `json:"keyFile"`
-	MaxConnections    int    `json:"maxConnections"`
-	ConnectionTimeout int    `json:"connectionTimeout"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ProjectName string `json:"projectName"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Description string `json:"description"`
+	UseTLS      bool   `json:"useTLS"`
+	CertFile    string `json:"certFile"`
+	KeyFile     string `json:"keyFile"`
 }
 
 // ListenerService manages C2 server listeners

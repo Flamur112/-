@@ -1,19 +1,33 @@
 {
   "server": {
-    "api_port": 23456,
-    "c2_default_port": 23456,
+    "api_port": 8080,
+    "c2_default_port": 8443,
     "tls_enabled": true,
     "tls_min_version": "1.2",
-    "tls_max_version": "1.3"
+    "tls_max_version": "1.3",
+    "api_unified": false,
+    "api_unified_port": 8443
   },
   "profiles": [
     {
-      "id": "unified",
-      "port": 23456,
-      "maxConnections": 500,
-      "connectionTimeout": 300,
-      "useTLS": true,
+      "id": "default",
+      "name": "Default TLS Profile",
+      "projectName": "MuliC2",
       "host": "0.0.0.0",
+      "port": 8443,
+      "description": "Default TLS-enabled C2 profile on HTTPS alternative port",
+      "useTLS": true,
+      "certFile": "../server.crt",
+      "keyFile": "../server.key"
+    },
+    {
+      "id": "production",
+      "name": "Production Profile",
+      "projectName": "MuliC2",
+      "host": "0.0.0.0",
+      "port": 8444,
+      "description": "Production TLS profile on alternative HTTPS port",
+      "useTLS": true,
       "certFile": "../server.crt",
       "keyFile": "../server.key"
     }
