@@ -435,8 +435,8 @@
       </el-tab-pane>
     </el-tabs>
 
-<!-- Command Dialog -->
-<el-dialog v-model="commandDialogVisible" title="Send Command" width="600px">
+    <!-- Command Dialog -->
+    <el-dialog v-model="commandDialogVisible" title="Send Command" width="600px">
       <el-form :model="commandForm" label-width="100px">
         <el-form-item label="Implant:">
           <el-input v-model="selectedImplantName" disabled />
@@ -1533,7 +1533,7 @@ const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
-  const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
+      const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
   
   eventSource.onmessage = (event) => {
     try {
