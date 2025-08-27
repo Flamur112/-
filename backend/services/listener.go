@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"io" // Added for io.EOF
 	"log"
 	"net"
 	"net/http" // Added for http.Handler
@@ -525,18 +526,26 @@ func (c *bufferedConn) Read(p []byte) (n int, err error) {
 func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 	log.Printf("🔍 DEBUG: Starting VNC detection for connection")
 
-	// Use a more sophisticated detection method that doesn't consume data
-	// VNC connections typically send specific patterns
-
-	// Create a buffered reader to peek at the data without consuming it
 	reader := bufio.NewReader(conn)
 
-	// Peek at the first few bytes to detect VNC patterns
-	peekBytes, err := reader.Peek(8)
-	if err != nil {
-		log.Printf("🔍 DEBUG: Could not peek at data: %v", err)
-		// If we can't peek, assume it's not VNC
-		return false, conn
+	// Try to peek at least 4 bytes, waiting up to 2 seconds if needed
+	var peekBytes []byte
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		peekBytes, err = reader.Peek(8)
+		if err == nil || len(peekBytes) >= 4 {
+			break
+		}
+		if err != nil && err != bufio.ErrBufferFull && err != io.EOF {
+			log.Printf("🔍 DEBUG: Could not peek at data: %v", err)
+			return false, conn
+		}
+		if time.Now().After(deadline) {
+			log.Printf("🔍 DEBUG: Timeout waiting for VNC data")
+			return false, conn
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	log.Printf("🔍 DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)
