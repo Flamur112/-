@@ -119,7 +119,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 
 	log.Printf("🔍 Starting VNC stream processing for %s", vncConn.ID)
 
-	buffer := make([]byte, 4096)
+	buffer := make([]byte, 8192) // Increased buffer size
 	var pendingData []byte
 
 	for vncConn.IsActive {
@@ -130,9 +130,18 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		default:
 		}
 
-		vncConn.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		// Always try to read more data if we don't have enough for a complete frame
+		needMoreData := true
+		if len(pendingData) >= 4 {
+			frameLength := binary.LittleEndian.Uint32(pendingData[:4])
+			totalFrameSize := 4 + int(frameLength)
+			if len(pendingData) >= totalFrameSize {
+				needMoreData = false
+			}
+		}
 
-		if len(pendingData) < 4 {
+		if needMoreData {
+			vncConn.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 			n, err := vncConn.conn.Read(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -166,7 +175,6 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			if frameLength < 10 || frameLength > 1024*200 {
 				log.Printf("🔍 Invalid frame length from %s: %d bytes, resyncing buffer", vncConn.ID, frameLength)
 				// Try to resync: search for next possible frame header
-				// Remove the first byte and try again
 				pendingData = pendingData[1:]
 				continue
 			}
@@ -181,10 +189,11 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 				}
 			}
 
+			// If we don't have the complete frame, break and read more data
 			if len(pendingData) < totalFrameSize {
-				log.Printf("🔍 Incomplete frame, waiting for more data (have %d, need %d)",
+				log.Printf("🔍 Incomplete frame, need to read more data (have %d, need %d)",
 					len(pendingData), totalFrameSize)
-				break
+				break // This will go back to reading more data
 			}
 
 			// Extract frame data
@@ -202,6 +211,51 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			vs.processFrame(vncConn, frameData)
 		}
 	}
+}
+
+// Alternative approach - More robust frame reading with dedicated function
+func (vs *VNCService) readCompleteFrame(conn net.Conn, buffer []byte, pendingData *[]byte) ([]byte, error) {
+	// Make sure we have at least the frame header (4 bytes)
+	for len(*pendingData) < 4 {
+		n, err := conn.Read(buffer)
+		if err != nil {
+			return nil, err
+		}
+		*pendingData = append(*pendingData, buffer[:n]...)
+	}
+
+	// Get frame length
+	frameLength := binary.LittleEndian.Uint32((*pendingData)[:4])
+	totalFrameSize := 4 + int(frameLength)
+
+	// Validate frame length
+	if frameLength < 10 || frameLength > 1024*200 {
+		return nil, fmt.Errorf("invalid frame length: %d", frameLength)
+	}
+
+	// Read until we have the complete frame
+	for len(*pendingData) < totalFrameSize {
+		conn.SetReadDeadline(time.Now().Add(15 * time.Second)) // Longer timeout for large frames
+		n, err := conn.Read(buffer)
+		if err != nil {
+			return nil, err
+		}
+		*pendingData = append(*pendingData, buffer[:n]...)
+		log.Printf("🔍 Reading frame data: have %d/%d bytes", len(*pendingData), totalFrameSize)
+	}
+
+	// Extract the complete frame
+	frameData := make([]byte, frameLength)
+	copy(frameData, (*pendingData)[4:4+frameLength])
+
+	// Remove processed frame from pending data
+	if len(*pendingData) > totalFrameSize {
+		*pendingData = (*pendingData)[totalFrameSize:]
+	} else {
+		*pendingData = nil
+	}
+
+	return frameData, nil
 }
 
 // processFrame handles individual frame processing
