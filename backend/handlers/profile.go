@@ -245,6 +245,12 @@ func (h *ProfileHandler) CreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce single-port C2: only allow host '0.0.0.0' and port 23456
+	if req.Host != "0.0.0.0" || req.Port != 23456 {
+		http.Error(w, "Only host '0.0.0.0' and port 23456 are allowed for single-port C2 operation", http.StatusBadRequest)
+		return
+	}
+
 	// Validate required fields
 	if req.ID == "" || req.Name == "" || req.Port <= 0 {
 		http.Error(w, "ID, name, and port are required", http.StatusBadRequest)
