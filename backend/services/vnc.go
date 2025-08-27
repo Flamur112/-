@@ -110,15 +110,15 @@ func (vs *VNCService) sendAcknowledgment(conn net.Conn) {
 // processVNCStream processes the incoming VNC stream with robust error handling
 func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("🔍 Panic in VNC stream processing for %s: %v", vncConn.ID, r)
-		}
-		vs.cleanupConnection(vncConn)
+		vs.mu.Lock()
+		delete(vs.connections, vncConn.ID)
+		vs.mu.Unlock()
+		vncConn.conn.Close()
+		log.Printf("🔍 VNC connection closed: %s", vncConn.ID)
 	}()
 
 	log.Printf("🔍 Starting VNC stream processing for %s", vncConn.ID)
 
-	// Use a smaller read buffer to prevent blocking
 	buffer := make([]byte, 4096)
 	var pendingData []byte
 
@@ -130,10 +130,8 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		default:
 		}
 
-		// Set a reasonable read timeout
 		vncConn.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
-		// Try to read frame length first
 		if len(pendingData) < 4 {
 			n, err := vncConn.conn.Read(buffer)
 			if err != nil {
@@ -158,7 +156,6 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 
 		// Process complete frames from pending data
 		for len(pendingData) >= 4 {
-			// Read frame length
 			frameLength := binary.LittleEndian.Uint32(pendingData[:4])
 			totalFrameSize := 4 + int(frameLength)
 
@@ -166,16 +163,12 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 				frameLength, totalFrameSize, len(pendingData))
 
 			// Validate frame length
-			if frameLength < 10 || frameLength > 1024*200 { // Max 200KB frames
-				log.Printf("🔍 Invalid frame length from %s: %d bytes", vncConn.ID, frameLength)
-				// Skip this frame by removing the length header
-				if len(pendingData) > 4 {
-					pendingData = pendingData[4:]
-					continue
-				} else {
-					pendingData = nil
-					break
-				}
+			if frameLength < 10 || frameLength > 1024*200 {
+				log.Printf("🔍 Invalid frame length from %s: %d bytes, resyncing buffer", vncConn.ID, frameLength)
+				// Try to resync: search for next possible frame header
+				// Remove the first byte and try again
+				pendingData = pendingData[1:]
+				continue
 			}
 
 			// Check for termination signal
@@ -183,12 +176,11 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 				terminationData := pendingData[4:13]
 				if string(terminationData) == "TERMINATE" {
 					log.Printf("🔍 VNC agent requested termination: %s", vncConn.ID)
-					pendingData = pendingData[13:] // Remove processed data
+					pendingData = pendingData[13:]
 					return
 				}
 			}
 
-			// Wait for complete frame
 			if len(pendingData) < totalFrameSize {
 				log.Printf("🔍 Incomplete frame, waiting for more data (have %d, need %d)",
 					len(pendingData), totalFrameSize)

