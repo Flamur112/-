@@ -600,7 +600,7 @@ const creatingListener = ref(false)
 const vncForm = ref({
   lhost: '',
   lport: '5900', // VNC target port (this is correct)
-  c2Port: '', // Auto-detected C2 server port (blank until detected)
+  c2Port: '443', // C2 server port
   payloadType: 'powershell',
   useLoader: true
 })
@@ -864,7 +864,7 @@ const createListener = async () => {
       host: listenerForm.value.host,
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
-        useTLS: listenerForm.value.protocol === 'https',
+        useTLS: listenerForm.value.protocol === 'tls',
         certFile: listenerForm.value.protocol === 'tls' ? '../server.crt' : '',
         keyFile: listenerForm.value.protocol === 'tls' ? '../server.key' : '',
         isActive: false
@@ -1005,11 +1005,6 @@ const generateVncPayload = async () => {
   setPortFromActiveListener()
   if (!activeTLSListener.value) {
     setPortFromActiveProfile()
-  }
-
-  if (!activeTLSListener.value) {
-    ElMessage.error('No HTTPS listener active. Start an HTTPS listener to generate a VNC payload.')
-    return
   }
 
   if (!vncForm.value.lhost || !vncForm.value.lport) {
@@ -1462,7 +1457,7 @@ const clearVncForm = () => {
   vncForm.value = {
     lhost: '',
     lport: '5900',
-    c2Port: '', // Auto-detected C2 server port
+    c2Port: '443', // C2 server port
     payloadType: 'powershell',
     useLoader: true
   }
