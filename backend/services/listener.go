@@ -1,16 +1,16 @@
 package services
 
 import (
-	"bufio"
+	"bufio" // Added for httpConn
 	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
-	"io"
+	"io" // Added for io.EOF
 	"log"
 	"net"
-	"net/http"
-	"os"
+	"net/http" // Added for http.Handler
+	"os"       // Added for os.Stat
 	"strings"
 	"sync"
 	"time"
@@ -29,118 +29,26 @@ type Profile struct {
 	KeyFile     string `json:"keyFile"`
 }
 
-// Validate validates the profile configuration
-func (p *Profile) Validate() error {
-	if p.ID == "" {
-		return fmt.Errorf("profile ID cannot be empty")
-	}
-	if p.Name == "" {
-		return fmt.Errorf("profile name cannot be empty")
-	}
-	if p.Host == "" {
-		p.Host = "0.0.0.0" // Default to all interfaces
-	}
-	if p.Port <= 0 || p.Port > 65535 {
-		return fmt.Errorf("invalid port number: %d (must be 1-65535)", p.Port)
-	}
-	if p.UseTLS {
-		if p.CertFile == "" || p.KeyFile == "" {
-			return fmt.Errorf("TLS is enabled but certificate files are not specified")
-		}
-		if _, err := os.Stat(p.CertFile); os.IsNotExist(err) {
-			return fmt.Errorf("certificate file not found: %s", p.CertFile)
-		}
-		if _, err := os.Stat(p.KeyFile); os.IsNotExist(err) {
-			return fmt.Errorf("private key file not found: %s", p.KeyFile)
-		}
-	}
-	return nil
-}
-
 // ListenerService manages C2 server listeners
 type ListenerService struct {
 	mu         sync.RWMutex
-	listeners  map[string]*listenerInstance
+	listeners  map[string]*listenerInstance // Map of profile ID to listener instance
 	ctx        context.Context
 	cancel     context.CancelFunc
-	router     http.Handler
-	vncService *VNCService
-	wg         sync.WaitGroup // Track goroutines
+	router     http.Handler // HTTP router for unified API mode
+	vncService *VNCService  // VNC service for handling VNC connections
 }
 
 // listenerInstance represents a single listener instance
 type listenerInstance struct {
-	listener    net.Listener
-	profile     *Profile
-	active      bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	connections sync.Map // Track active connections
-	connCount   int64    // Connection counter
+	listener net.Listener
+	profile  *Profile
+	active   bool
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
-// VNCService interface defines the contract for VNC service implementations
-type VNCServiceInterface interface {
-	HandleVNCConnection(conn net.Conn, remoteAddr string)
-	Close() error
-}
-
-// VNCService handles VNC connections - implement this according to your needs
-type VNCService struct {
-	// Add your VNC service fields here
-	active bool
-	mu     sync.RWMutex
-}
-
-// NewVNCService creates a new VNC service instance
-func NewVNCService() *VNCService {
-	return &VNCService{
-		active: true,
-	}
-}
-
-// HandleVNCConnection handles incoming VNC connections
-func (v *VNCService) HandleVNCConnection(conn net.Conn, remoteAddr string) {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	if !v.active {
-		conn.Close()
-		return
-	}
-
-	defer conn.Close()
-
-	log.Printf("🔍 VNC connection from %s - handling...", remoteAddr)
-
-	// TODO: Implement your VNC handling logic here
-	// For now, we'll just log and close the connection
-	buffer := make([]byte, 1024)
-	for {
-		n, err := conn.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("VNC connection error from %s: %v", remoteAddr, err)
-			}
-			break
-		}
-
-		log.Printf("🔍 VNC data from %s: %d bytes", remoteAddr, n)
-		// Process VNC data here
-	}
-
-	log.Printf("🔍 VNC connection from %s closed", remoteAddr)
-}
-
-// Close shuts down the VNC service
-func (v *VNCService) Close() error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	v.active = false
-	log.Printf("🔍 VNC service closed")
-	return nil
-}
+// NewListenerService creates a new listener service
 func NewListenerService() *ListenerService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ListenerService{
@@ -163,120 +71,148 @@ func (ls *ListenerService) GetVNCService() *VNCService {
 	return ls.vncService
 }
 
-// createTLSConfig creates TLS configuration with enhanced compatibility
+// createTLSConfig creates TLS configuration with TLS 1.3 support
 func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error) {
-	// Load certificates
-	cert, err := tls.LoadX509KeyPair(profile.CertFile, profile.KeyFile)
+	var cert tls.Certificate
+	var err error
+
+	// TLS requires certificate files - no fallback to self-signed
+	if profile.CertFile == "" || profile.KeyFile == "" {
+		return nil, fmt.Errorf("TLS is enabled but certificate files are not specified. Please provide CertFile and KeyFile in profile configuration")
+	}
+
+	// Load user-provided certificates
+	cert, err = tls.LoadX509KeyPair(profile.CertFile, profile.KeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load certificate files: %w", err)
 	}
-	log.Printf("🔒 Loaded certificate from %s and %s", profile.CertFile, profile.KeyFile)
+	log.Printf("🔒 Loaded user certificate from %s and %s", profile.CertFile, profile.KeyFile)
 
+	// Create TLS config with modern security settings
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-		MaxVersion:   tls.VersionTLS13,
-
-		// Enhanced cipher suites for better compatibility
+		MinVersion:   tls.VersionTLS12, // Minimum TLS 1.2
+		MaxVersion:   tls.VersionTLS13, // Maximum TLS 1.3
 		CipherSuites: []uint16{
-			// TLS 1.3 cipher suites
+			// TLS 1.3 cipher suites (preferred)
 			tls.TLS_AES_256_GCM_SHA384,
 			tls.TLS_CHACHA20_POLY1305_SHA256,
 			tls.TLS_AES_128_GCM_SHA256,
-
-			// TLS 1.2 cipher suites for PowerShell/.NET compatibility
+			// TLS 1.2 fallback cipher suites
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-
-			// Additional RSA cipher suites for broader compatibility
-			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_RSA_WITH_AES_256_CBC_SHA256,
-			tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
 		},
-
 		PreferServerCipherSuites: true,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
 			tls.CurveP384,
 		},
-		ClientAuth:             tls.NoClientCert,
-		SessionTicketsDisabled: false,
-
-		// Enhanced logging
-		GetCertificate: func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			log.Printf("🔒 TLS ClientHello: SNI=%s", clientHello.ServerName)
-			return &cert, nil
-		},
+		// Allow client to choose TLS version (1.3 or 1.2)
+		ClientAuth: tls.NoClientCert,
 	}
-
-	log.Printf("🔒 TLS Configuration: Min=%s, Max=%s, Ciphers=%d",
-		tlsVersionToString(tlsConfig.MinVersion),
-		tlsVersionToString(tlsConfig.MaxVersion),
-		len(tlsConfig.CipherSuites))
 
 	return tlsConfig, nil
 }
 
-// tlsVersionToString converts TLS version constants to readable strings
-func tlsVersionToString(version uint16) string {
-	switch version {
-	case tls.VersionTLS13:
-		return "1.3"
-	case tls.VersionTLS12:
-		return "1.2"
-	case tls.VersionTLS11:
-		return "1.1"
-	case tls.VersionTLS10:
-		return "1.0"
-	default:
-		return fmt.Sprintf("Unknown(0x%04x)", version)
-	}
-}
-
 // StartListener starts a new C2 listener with the specified profile
 func (ls *ListenerService) StartListener(profile *Profile) error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	// Validate profile
 	if profile == nil {
 		return fmt.Errorf("profile cannot be nil")
 	}
 
-	// Validate profile
-	if err := profile.Validate(); err != nil {
-		return fmt.Errorf("invalid profile: %w", err)
+	// Generate unique profile ID if there are conflicts
+	originalID := profile.ID
+	uniqueID := profile.ID
+	counter := 1
+
+	for {
+		if existing, exists := ls.listeners[uniqueID]; exists && existing.active {
+			// Generate new unique ID
+			uniqueID = fmt.Sprintf("%s_%d", originalID, counter)
+			counter++
+
+			// Prevent infinite loop (safety check)
+			if counter > 1000 {
+				return fmt.Errorf("could not generate unique profile ID after 1000 attempts")
+			}
+		} else {
+			break
+		}
 	}
 
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-
-	// Generate unique profile ID if conflicts exist
-	uniqueID := ls.generateUniqueID(profile.ID)
-	if uniqueID != profile.ID {
-		log.Printf("⚠️ Profile ID conflict. Generated unique ID: %s -> %s", profile.ID, uniqueID)
+	// Update profile with unique ID
+	if uniqueID != originalID {
+		log.Printf("⚠️  Profile ID conflict detected. Generated unique ID: %s -> %s", originalID, uniqueID)
 		profile.ID = uniqueID
 	}
 
-	// Check port availability
-	if err := ls.checkPortAvailability(profile.Host, profile.Port); err != nil {
-		return fmt.Errorf("port check failed: %w", err)
-	}
-
-	// Warn about privileged ports
+	// Check if port is privileged (requires root or setcap)
 	if profile.Port < 1024 {
-		log.Printf("⚠️ WARNING: Port %d is privileged. Ensure proper permissions.", profile.Port)
+		log.Printf("⚠️  WARNING: Port %d is privileged (< 1024). Ensure the backend has proper permissions:", profile.Port)
+		log.Printf("   - Run as root: sudo ./mulic2")
+		log.Printf("   - Or apply setcap: sudo setcap 'cap_net_bind_service=+ep' ./mulic2")
+		log.Printf("   - Or use a non-privileged port (>= 1024)")
 	}
 
-	// Create listener
-	listener, err := ls.createListener(profile)
-	if err != nil {
-		return fmt.Errorf("failed to create listener: %w", err)
+	// Check port availability first
+	if err := ls.checkPortAvailability(profile.Host, profile.Port); err != nil {
+		return fmt.Errorf("port %d is not available: %w", profile.Port, err)
 	}
 
-	// Create instance
+	addr := fmt.Sprintf("%s:%d", profile.Host, profile.Port)
+	var listener net.Listener
+	var err error
+
+	if profile.UseTLS {
+		// Validate certificate files exist when TLS is enabled
+		if profile.CertFile == "" || profile.KeyFile == "" {
+			return fmt.Errorf("TLS is enabled but certificate files are not specified. Please provide CertFile and KeyFile in profile configuration")
+		}
+
+		// Check if certificate files exist
+		if _, err := os.Stat(profile.CertFile); os.IsNotExist(err) {
+			return fmt.Errorf("certificate file not found: %s", profile.CertFile)
+		}
+		if _, err := os.Stat(profile.KeyFile); os.IsNotExist(err) {
+			return fmt.Errorf("private key file not found: %s", profile.KeyFile)
+		}
+
+		// Load TLS configuration
+		tlsConfig, err := ls.createTLSConfig(profile)
+		if err != nil {
+			return fmt.Errorf("failed to create TLS config: %w", err)
+		}
+
+		// Create TCP listener first
+		tcpListener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to start TCP listener on %s: %w", addr, err)
+		}
+
+		// Wrap with TLS listener
+		listener = tls.NewListener(tcpListener, tlsConfig)
+		log.Printf("🔒 TLS C2 Listener started on %s (Profile: %s) - TLS 1.3/1.2 enabled with certificates", addr, profile.Name)
+	} else {
+		// Create plain TCP listener
+		listener, err = net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to start listener on %s: %w", addr, err)
+		}
+		log.Printf("🌐 Plain TCP C2 Listener started on %s (Profile: %s)", addr, profile.Name)
+	}
+
+	// Verify listener was created successfully
+	if listener == nil {
+		return fmt.Errorf("failed to create listener - listener is nil")
+	}
+
+	// Create listener instance
 	instanceCtx, instanceCancel := context.WithCancel(ls.ctx)
 	instance := &listenerInstance{
 		listener: listener,
@@ -286,70 +222,26 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 		cancel:   instanceCancel,
 	}
 
+	// Store the instance
 	ls.listeners[profile.ID] = instance
 
-	// Start accepting connections
-	ls.wg.Add(1)
+	// Start accepting connections in a goroutine
 	go ls.acceptConnections(instance)
 
 	return nil
 }
 
-// generateUniqueID generates a unique profile ID
-func (ls *ListenerService) generateUniqueID(baseID string) string {
-	if _, exists := ls.listeners[baseID]; !exists {
-		return baseID
-	}
-
-	for i := 1; i <= 1000; i++ {
-		uniqueID := fmt.Sprintf("%s_%d", baseID, i)
-		if _, exists := ls.listeners[uniqueID]; !exists {
-			return uniqueID
-		}
-	}
-
-	// Fallback with timestamp
-	return fmt.Sprintf("%s_%d", baseID, time.Now().Unix())
-}
-
-// createListener creates the appropriate listener type
-func (ls *ListenerService) createListener(profile *Profile) (net.Listener, error) {
-	addr := fmt.Sprintf("%s:%d", profile.Host, profile.Port)
-
-	if profile.UseTLS {
-		tlsConfig, err := ls.createTLSConfig(profile)
-		if err != nil {
-			return nil, fmt.Errorf("TLS config creation failed: %w", err)
-		}
-
-		tcpListener, err := net.Listen("tcp", addr)
-		if err != nil {
-			return nil, fmt.Errorf("TCP listener creation failed: %w", err)
-		}
-
-		tlsListener := tls.NewListener(tcpListener, tlsConfig)
-		log.Printf("🔒 TLS C2 Listener started on %s (Profile: %s)", addr, profile.Name)
-		return tlsListener, nil
-	}
-
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("TCP listener creation failed: %w", err)
-	}
-
-	log.Printf("🌐 TCP C2 Listener started on %s (Profile: %s)", addr, profile.Name)
-	return listener, nil
-}
-
-// checkPortAvailability checks if a port is available
+// checkPortAvailability checks if a port is available for binding
 func (ls *ListenerService) checkPortAvailability(host string, port int) error {
+	// Try to bind to the port temporarily to check availability
 	testListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
+		// Suggest alternative ports
 		suggestedPorts := ls.findAvailablePorts(host, port)
 		if len(suggestedPorts) > 0 {
-			return fmt.Errorf("port %d unavailable. Suggested ports: %v", port, suggestedPorts)
+			return fmt.Errorf("port %d is already in use. Suggested available ports: %v", port, suggestedPorts)
 		}
-		return fmt.Errorf("port %d unavailable", port)
+		return fmt.Errorf("port %d is already in use or not available", port)
 	}
 	testListener.Close()
 	return nil
@@ -358,23 +250,22 @@ func (ls *ListenerService) checkPortAvailability(host string, port int) error {
 // findAvailablePorts finds available ports near the requested port
 func (ls *ListenerService) findAvailablePorts(host string, requestedPort int) []int {
 	var availablePorts []int
-
-	for offset := -5; offset <= 5 && len(availablePorts) < 3; offset++ {
+	// Check ports in range [requestedPort-5, requestedPort+5]
+	for offset := -5; offset <= 5; offset++ {
 		if offset == 0 {
-			continue
+			continue // Skip the requested port itself
 		}
-
 		testPort := requestedPort + offset
-		if testPort < 1024 || testPort > 65535 {
-			continue
-		}
-
-		if testListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, testPort)); err == nil {
-			testListener.Close()
-			availablePorts = append(availablePorts, testPort)
+		if testPort >= 1024 && testPort <= 65535 { // Valid port range
+			if testListener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, testPort)); err == nil {
+				testListener.Close()
+				availablePorts = append(availablePorts, testPort)
+				if len(availablePorts) >= 3 { // Limit to 3 suggestions
+					break
+				}
+			}
 		}
 	}
-
 	return availablePorts
 }
 
@@ -389,11 +280,19 @@ func (ls *ListenerService) StopListener(profileID string) error {
 	}
 
 	if !instance.active {
-		return nil // Already stopped
+		return nil
 	}
+
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic in StopListener: %v", r)
+		}
+	}()
 
 	ls.stopListenerInternal(profileID)
 
+	// Safe access to profile name
 	profileName := "unknown"
 	if instance.profile != nil {
 		profileName = instance.profile.Name
@@ -403,30 +302,21 @@ func (ls *ListenerService) StopListener(profileID string) error {
 	return nil
 }
 
-// stopListenerInternal stops a listener without locking
+// stopListenerInternal stops a specific listener without locking (internal use)
 func (ls *ListenerService) stopListenerInternal(profileID string) {
 	instance, exists := ls.listeners[profileID]
-	if !exists || !instance.active {
+	if !exists {
 		return
 	}
 
-	// Close all connections
-	instance.connections.Range(func(key, value interface{}) bool {
-		if conn, ok := value.(net.Conn); ok {
-			conn.Close()
-		}
-		instance.connections.Delete(key)
-		return true
-	})
-
-	// Close listener
 	if instance.listener != nil {
 		instance.listener.Close()
 		instance.listener = nil
 	}
-
 	instance.active = false
 	instance.cancel()
+
+	// Remove from map
 	delete(ls.listeners, profileID)
 }
 
@@ -443,9 +333,9 @@ func (ls *ListenerService) StopAllListeners() error {
 	return nil
 }
 
-// acceptConnections handles incoming connections with proper error handling
+// acceptConnections handles incoming connections
 func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
-	defer ls.wg.Done()
+	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic in acceptConnections: %v", r)
@@ -457,43 +347,40 @@ func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
 		case <-instance.ctx.Done():
 			return
 		default:
-			// Set timeout for non-blocking accept
+			// Check if listener is still valid
+			if instance.listener == nil {
+				log.Printf("Listener is nil, stopping acceptConnections")
+				return
+			}
+
+			// Set a timeout for accepting connections
 			if tcpListener, ok := instance.listener.(*net.TCPListener); ok {
 				tcpListener.SetDeadline(time.Now().Add(1 * time.Second))
 			}
 
 			conn, err := instance.listener.Accept()
 			if err != nil {
+				// Check if it's a timeout error (expected)
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					continue // Expected timeout
+					continue
 				}
+				// Check if listener was closed
 				if instance.ctx.Err() != nil {
-					return // Context cancelled
+					return
 				}
-				log.Printf("Accept error: %v", err)
+				log.Printf("Error accepting connection: %v", err)
 				continue
 			}
 
-			// Track connection
-			connID := fmt.Sprintf("conn_%d_%d", instance.connCount, time.Now().UnixNano())
-			instance.connCount++
-			instance.connections.Store(connID, conn)
-
-			// Handle connection
-			ls.wg.Add(1)
-			go func() {
-				defer ls.wg.Done()
-				defer func() {
-					instance.connections.Delete(connID)
-				}()
-				ls.handleConnection(conn, instance, connID)
-			}()
+			// Handle the connection in a goroutine
+			go ls.handleConnection(conn, instance)
 		}
 	}
 }
 
 // handleConnection handles an individual client connection
-func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance, connID string) {
+func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance) {
+	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic in handleConnection: %v", r)
@@ -502,184 +389,119 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	}()
 
 	remoteAddr := conn.RemoteAddr().String()
+
+	// Determine connection type
 	connType := "TCP"
-
-	// Enhanced TLS logging
 	if tlsConn, ok := conn.(*tls.Conn); ok {
-		// Set handshake timeout
-		conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-		// Perform handshake
-		if err := tlsConn.Handshake(); err != nil {
-			log.Printf("TLS handshake failed from %s: %v", remoteAddr, err)
-			return
-		}
-
-		// Remove deadline after successful handshake
-		conn.SetDeadline(time.Time{})
-
+		connType = fmt.Sprintf("TLS %s", tlsConn.ConnectionState().Version)
+		// Log TLS details
 		state := tlsConn.ConnectionState()
-		tlsVersion := tlsVersionToString(state.Version)
-		connType = fmt.Sprintf("TLS %s", tlsVersion)
-
-		log.Printf("🔒 TLS connection from %s: %s, Cipher: %s",
-			remoteAddr, tlsVersion, tls.CipherSuiteName(state.CipherSuite))
+		log.Printf("🔒 New TLS connection from %s - Version: %s, Cipher: %s",
+			remoteAddr, tlsVersionString(state.Version), tls.CipherSuiteName(state.CipherSuite))
 	} else {
-		log.Printf("🔌 TCP connection from %s", remoteAddr)
+		log.Printf("🔌 New TCP connection from %s", remoteAddr)
 	}
 
-	// VNC detection with better buffering
+	// IMMEDIATELY check if this is a VNC connection (before any other detection)
+	// VNC connections send 4-byte length headers followed by image data
+	log.Printf("🔍 DEBUG: About to detect VNC connection from %s", remoteAddr)
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
 	if vncDetected {
-		log.Printf("🔍 VNC connection detected from %s", remoteAddr)
+		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
 		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
 		return
 	}
+	log.Printf("🔍 DEBUG: VNC detection completed, not a VNC connection")
 
-	// HTTP detection for unified API mode
-	if ls.router != nil && ls.detectHTTPConnection(bufferedConn) {
-		log.Printf("🌐 HTTP request detected from %s", remoteAddr)
-		ls.handleHTTPRequest(&httpConn{Conn: bufferedConn, reader: bufio.NewReader(bufferedConn)})
-		return
-	}
+	// Check if this is an HTTP request (for unified API mode) - ONLY if not VNC
+	if ls.router != nil {
+		// Create a buffered reader to peek at the request
+		reader := bufio.NewReader(conn)
+		peek, err := reader.Peek(8) // Peek more bytes to better detect HTTP
+		if err == nil {
+			// Check if it looks like an HTTP request (more comprehensive check)
+			peekStr := string(peek)
+			if strings.HasPrefix(peekStr, "GET ") ||
+				strings.HasPrefix(peekStr, "POST") ||
+				strings.HasPrefix(peekStr, "PUT ") ||
+				strings.HasPrefix(peekStr, "DELETE") ||
+				strings.HasPrefix(peekStr, "HEAD") ||
+				strings.HasPrefix(peekStr, "OPTIONS") ||
+				strings.HasPrefix(peekStr, "PATCH") {
 
-	// Standard C2 handling
-	ls.handleC2Connection(bufferedConn, instance, connType, remoteAddr)
-}
+				log.Printf("🌐 HTTP request detected from %s, routing to API", remoteAddr)
 
-// detectHTTPConnection detects if the connection is HTTP
-func (ls *ListenerService) detectHTTPConnection(conn net.Conn) bool {
-	reader := bufio.NewReader(conn)
-	peek, err := reader.Peek(8)
-	if err != nil {
-		return false
-	}
+				// Create a custom net.Conn that wraps the buffered reader
+				httpConn := &httpConn{
+					Conn:   conn,
+					reader: reader,
+				}
 
-	peekStr := string(peek)
-	httpMethods := []string{"GET ", "POST", "PUT ", "DELETE", "HEAD", "OPTIONS", "PATCH"}
-
-	for _, method := range httpMethods {
-		if strings.HasPrefix(peekStr, method) {
-			return true
+				// Handle HTTP request directly
+				ls.handleHTTPRequest(httpConn)
+				return
+			}
 		}
 	}
 
-	return false
-}
-
-// detectVNCConnection detects VNC connections with enhanced PowerShell support
-func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
-	reader := bufio.NewReader(conn)
-
-	// Set a reasonable timeout for detection
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	defer conn.SetReadDeadline(time.Time{}) // Clear deadline
-
-	peekBytes, err := reader.Peek(8)
-	if err != nil && err != io.EOF && err != bufio.ErrBufferFull {
-		return false, conn
-	}
-
-	if len(peekBytes) >= 4 {
-		// Check for VNC frame length (both endianness)
-		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
-		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
-
-		// PowerShell VNC detection (typical JPEG frames: 1KB-50KB)
-		if (frameLengthLE >= 1024 && frameLengthLE <= 1024*50) ||
-			(frameLengthBE >= 1024 && frameLengthBE <= 1024*50) {
-			return true, &bufferedConn{Conn: conn, reader: reader}
-		}
-
-		// General VNC detection with broader range
-		if (frameLengthLE >= 100 && frameLengthLE <= 1024*1024) ||
-			(frameLengthBE >= 100 && frameLengthBE <= 1024*1024) {
-			return true, &bufferedConn{Conn: conn, reader: reader}
-		}
-
-		// Check for RFB header
-		if len(peekBytes) >= 3 && peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 {
-			return true, &bufferedConn{Conn: conn, reader: reader}
-		}
-	}
-
-	return false, conn
-}
-
-// handleC2Connection handles standard C2 protocol
-func (ls *ListenerService) handleC2Connection(conn net.Conn, instance *listenerInstance, connType, remoteAddr string) {
-	// Send welcome message
+	// Send welcome message with connection details
 	profileName := "unknown"
 	if instance.profile != nil {
 		profileName = instance.profile.Name
 	}
-
-	welcomeMsg := fmt.Sprintf("Welcome to MuliC2 - Profile: %s\nConnection: %s\nRemote: %s\nPS > ",
-		profileName, connType, remoteAddr)
+	welcomeMsg := fmt.Sprintf("Welcome to MuliC2 - Profile: %s\n", profileName)
+	welcomeMsg += fmt.Sprintf("Connection: %s\n", connType)
+	welcomeMsg += fmt.Sprintf("Remote: %s\n", remoteAddr)
+	welcomeMsg += "PS > "
 	conn.Write([]byte(welcomeMsg))
 
-	// Command handling loop
+	// Enhanced C2 command handling
 	buffer := make([]byte, 4096)
-	conn.SetReadDeadline(time.Now().Add(5 * time.Minute)) // 5 minute timeout
-
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("Connection read error from %s: %v", remoteAddr, err)
-			}
+			log.Printf("Connection closed from %s: %v", remoteAddr, err)
 			break
 		}
 
-		command := strings.TrimSpace(string(buffer[:n]))
+		command := string(buffer[:n])
+		command = trimCommand(command)
+
 		if command == "" {
 			continue
 		}
 
-		// Reset read deadline on activity
-		conn.SetReadDeadline(time.Now().Add(5 * time.Minute))
-
-		// Handle commands
-		response := ls.handleCommand(command, connType, instance)
-		if response == "DISCONNECT" {
-			break
+		// Handle special commands
+		switch command {
+		case "exit", "quit":
+			log.Printf("Client %s requested disconnect", remoteAddr)
+			conn.Write([]byte("Disconnecting...\n"))
+			return
+		case "version":
+			version := "MuliC2 v1.0.0"
+			if tlsConn, ok := conn.(*tls.Conn); ok {
+				state := tlsConn.ConnectionState()
+				version += fmt.Sprintf(" | TLS %s | Cipher: %s",
+					tlsVersionString(state.Version), tls.CipherSuiteName(state.CipherSuite))
+			}
+			conn.Write([]byte(version + "\nPS > "))
+		case "status":
+			profileName := "unknown"
+			if instance.profile != nil {
+				profileName = instance.profile.Name
+			}
+			status := fmt.Sprintf("Active: true | Profile: %s | Connection: %s",
+				profileName, connType)
+			conn.Write([]byte(status + "\nPS > "))
+		default:
+			// Echo back the received command (placeholder for actual command execution)
+			response := fmt.Sprintf("Command received: %s\nPS > ", command)
+			conn.Write([]byte(response))
 		}
-
-		conn.Write([]byte(response))
 	}
 }
 
-// handleCommand processes C2 commands
-func (ls *ListenerService) handleCommand(command, connType string, instance *listenerInstance) string {
-	switch strings.ToLower(command) {
-	case "exit", "quit":
-		return "Disconnecting...\n"
-
-	case "version":
-		return fmt.Sprintf("MuliC2 v1.0.0 | Connection: %s\nPS > ", connType)
-
-	case "status":
-		profileName := "unknown"
-		if instance.profile != nil {
-			profileName = instance.profile.Name
-		}
-		return fmt.Sprintf("Active: %v | Profile: %s | Type: %s\nPS > ",
-			instance.active, profileName, connType)
-
-	case "help":
-		help := "Available commands:\n"
-		help += "  version - Show version info\n"
-		help += "  status  - Show connection status\n"
-		help += "  help    - Show this help\n"
-		help += "  exit    - Disconnect\nPS > "
-		return help
-
-	default:
-		return fmt.Sprintf("Command received: %s\nPS > ", command)
-	}
-}
-
-// Connection wrapper types
+// httpConn wraps a net.Conn with a buffered reader for HTTP requests
 type httpConn struct {
 	net.Conn
 	reader *bufio.Reader
@@ -689,6 +511,7 @@ func (c *httpConn) Read(p []byte) (n int, err error) {
 	return c.reader.Read(p)
 }
 
+// bufferedConn wraps a net.Conn with a buffered reader for VNC connections
 type bufferedConn struct {
 	net.Conn
 	reader *bufio.Reader
@@ -698,27 +521,121 @@ func (c *bufferedConn) Read(p []byte) (n int, err error) {
 	return c.reader.Read(p)
 }
 
+// detectVNCConnection detects if a connection is a VNC connection
+// Returns (isVNC, connection) - if VNC detected, returns a buffered connection
+func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
+	log.Printf("🔍 DEBUG: Starting VNC detection for connection")
+
+	reader := bufio.NewReader(conn)
+
+	// Try to peek at least 4 bytes, waiting up to 2 seconds if needed
+	var peekBytes []byte
+	var err error
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		peekBytes, err = reader.Peek(8)
+		if err == nil || len(peekBytes) >= 4 {
+			break
+		}
+		if err != nil && err != bufio.ErrBufferFull && err != io.EOF {
+			log.Printf("🔍 DEBUG: Could not peek at data: %v", err)
+			return false, conn
+		}
+		if time.Now().After(deadline) {
+			log.Printf("🔍 DEBUG: Timeout waiting for VNC data")
+			return false, conn
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	log.Printf("🔍 DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)
+
+	// Check for VNC frame header pattern (4-byte length + reasonable size)
+	if len(peekBytes) >= 4 {
+		// Try big-endian first
+		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
+		log.Printf("🔍 DEBUG: Frame length (big-endian): %d bytes", frameLengthBE)
+
+		// Try little-endian (PowerShell might send this)
+		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
+		log.Printf("🔍 DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
+
+		// Check for PowerShell VNC specifically FIRST (JPEG frames, typically 1KB to 50KB)
+		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
+			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
+
+			var frameLength uint32
+			if frameLengthBE >= 1024 && frameLengthBE <= 1024*50 {
+				frameLength = frameLengthBE
+				log.Printf("🔍 DEBUG: PowerShell VNC detected with big-endian: %d bytes", frameLength)
+			} else {
+				frameLength = frameLengthLE
+				log.Printf("🔍 DEBUG: PowerShell VNC detected with little-endian: %d bytes", frameLength)
+			}
+
+			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+
+		// Check if either endianness gives a reasonable frame size for general VNC
+		if (frameLengthBE >= 100 && frameLengthBE <= 1024*1024) ||
+			(frameLengthLE >= 100 && frameLengthLE <= 1024*1024) {
+
+			// Use the more reasonable length
+			var frameLength uint32
+			if frameLengthBE >= 100 && frameLengthBE <= 1024*1024 {
+				frameLength = frameLengthBE
+				log.Printf("🔍 DEBUG: Using big-endian frame length: %d", frameLength)
+			} else {
+				frameLength = frameLengthLE
+				log.Printf("🔍 DEBUG: Using little-endian frame length: %d", frameLength)
+			}
+
+			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
+			// Return a buffered connection wrapper
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+	}
+
+	// Check for other VNC-specific patterns
+	// Some VNC implementations send specific magic bytes or headers
+	if len(peekBytes) >= 4 {
+		// Check for common VNC magic bytes or patterns
+		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
+			log.Printf("🔍 VNC RFB header detected")
+			// Return a buffered connection wrapper
+			return true, &bufferedConn{Conn: conn, reader: reader}
+		}
+	}
+
+	log.Printf("🔍 DEBUG: No VNC pattern detected")
+	return false, conn
+}
+
 // handleHTTPRequest handles HTTP requests in unified mode
 func (ls *ListenerService) handleHTTPRequest(conn *httpConn) {
 	defer conn.Close()
 
+	// Create a response writer
 	responseWriter := &httpResponseWriter{
 		conn:       conn,
 		header:     make(http.Header),
 		statusCode: 200,
 	}
 
+	// Create a request
 	req, err := http.ReadRequest(conn.reader)
 	if err != nil {
-		log.Printf("HTTP request read error: %v", err)
+		log.Printf("Error reading HTTP request: %v", err)
 		return
 	}
 	defer req.Body.Close()
 
+	// Serve the request
 	ls.router.ServeHTTP(responseWriter, req)
 }
 
-// httpResponseWriter implements http.ResponseWriter
+// httpResponseWriter implements http.ResponseWriter for our custom connection
 type httpResponseWriter struct {
 	conn        *httpConn
 	header      http.Header
@@ -744,14 +661,15 @@ func (w *httpResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 	w.wroteHeader = true
 
+	// Write status line
 	statusText := http.StatusText(statusCode)
 	if statusText == "" {
 		statusText = "Unknown"
 	}
-
 	statusLine := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText)
 	w.conn.Write([]byte(statusLine))
 
+	// Write headers
 	for key, values := range w.header {
 		for _, value := range values {
 			headerLine := fmt.Sprintf("%s: %s\r\n", key, value)
@@ -759,20 +677,49 @@ func (w *httpResponseWriter) WriteHeader(statusCode int) {
 		}
 	}
 
+	// End headers
 	w.conn.Write([]byte("\r\n"))
 }
 
-// Status and management methods
+// trimCommand removes common command terminators
+func trimCommand(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	cmd = strings.TrimSuffix(cmd, "\n")
+	cmd = strings.TrimSuffix(cmd, "\r")
+	cmd = strings.TrimSuffix(cmd, "\r\n")
+	return cmd
+}
+
+// tlsVersionString converts TLS version to readable string
+func tlsVersionString(version uint16) string {
+	switch version {
+	case tls.VersionTLS13:
+		return "1.3"
+	case tls.VersionTLS12:
+		return "1.2"
+	case tls.VersionTLS11:
+		return "1.1"
+	case tls.VersionTLS10:
+		return "1.0"
+	default:
+		return fmt.Sprintf("Unknown(%d)", version)
+	}
+}
+
+// GetStatus returns the current listener status for all profiles
 func (ls *ListenerService) GetStatus() map[string]interface{} {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
 
-	activeCount := 0
-	profiles := make(map[string]interface{})
+	status := map[string]interface{}{
+		"total_listeners":  len(ls.listeners),
+		"active_listeners": 0,
+		"profiles":         make(map[string]interface{}),
+	}
 
 	for profileID, instance := range ls.listeners {
 		if instance.active {
-			activeCount++
+			status["active_listeners"] = status["active_listeners"].(int) + 1
 		}
 
 		profileStatus := map[string]interface{}{
@@ -782,27 +729,15 @@ func (ls *ListenerService) GetStatus() map[string]interface{} {
 		if instance.active && instance.profile != nil {
 			profileStatus["profile"] = instance.profile
 			profileStatus["address"] = fmt.Sprintf("%s:%d", instance.profile.Host, instance.profile.Port)
-			profileStatus["tls_enabled"] = instance.profile.UseTLS
-
-			// Count active connections
-			connectionCount := 0
-			instance.connections.Range(func(_, _ interface{}) bool {
-				connectionCount++
-				return true
-			})
-			profileStatus["active_connections"] = connectionCount
 		}
 
-		profiles[profileID] = profileStatus
+		status["profiles"].(map[string]interface{})[profileID] = profileStatus
 	}
 
-	return map[string]interface{}{
-		"total_listeners":  len(ls.listeners),
-		"active_listeners": activeCount,
-		"profiles":         profiles,
-	}
+	return status
 }
 
+// IsActive returns whether any listener is currently active
 func (ls *ListenerService) IsActive() bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
@@ -815,6 +750,7 @@ func (ls *ListenerService) IsActive() bool {
 	return false
 }
 
+// IsProfileActive returns whether a specific profile is active
 func (ls *ListenerService) IsProfileActive(profileID string) bool {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
@@ -823,6 +759,7 @@ func (ls *ListenerService) IsProfileActive(profileID string) bool {
 	return exists && instance.active
 }
 
+// GetActiveProfiles returns all currently active profiles
 func (ls *ListenerService) GetActiveProfiles() []*Profile {
 	ls.mu.RLock()
 	defer ls.mu.RUnlock()
@@ -836,36 +773,16 @@ func (ls *ListenerService) GetActiveProfiles() []*Profile {
 	return activeProfiles
 }
 
-// Close shuts down all listeners and waits for goroutines to finish
+// Close shuts down all listeners
 func (ls *ListenerService) Close() error {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	// Cancel context to signal all goroutines to stop
 	ls.cancel()
 
-	// Stop all listeners
+	// Close all listeners
 	for profileID := range ls.listeners {
 		ls.stopListenerInternal(profileID)
-	}
-
-	// Close VNC service
-	if ls.vncService != nil {
-		ls.vncService.Close()
-	}
-
-	// Wait for all goroutines to finish with timeout
-	done := make(chan struct{})
-	go func() {
-		ls.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		log.Printf("🛑 ListenerService closed gracefully")
-	case <-time.After(10 * time.Second):
-		log.Printf("🛑 ListenerService close timeout - some goroutines may still be running")
 	}
 
 	return nil
