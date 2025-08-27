@@ -1,12 +1,12 @@
 {
   "server": {
-    "api_port": 8080,
-    "c2_default_port": 8443,
+    "api_port": 23456,
+    "c2_default_port": 23456,
     "tls_enabled": true,
     "tls_min_version": "1.2",
     "tls_max_version": "1.3",
     "api_unified": false,
-    "api_unified_port": 8443
+    "api_unified_port": 23456
   },
   "profiles": [
     {
@@ -14,7 +14,7 @@
       "name": "Default TLS Profile",
       "projectName": "MuliC2",
       "host": "0.0.0.0",
-      "port": 8443,
+      "port": 23456,
       "description": "Default TLS-enabled C2 profile on HTTPS alternative port",
       "useTLS": true,
       "certFile": "../server.crt",
