@@ -1,7 +1,7 @@
 {
   "server": {
-    "api_port": 8080,
-    "c2_default_port": 8443,
+    "api_port": 23456,
+    "c2_default_port": 23456,
     "tls_enabled": true,
     "tls_min_version": "1.2",
     "tls_max_version": "1.3",
