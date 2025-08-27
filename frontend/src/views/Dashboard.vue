@@ -1075,7 +1075,7 @@ function Invoke-GracefulCleanup {
                     \$global:sslStream.Write(\$lengthBytes, 0, 4)
                     \$global:sslStream.Write(\$terminationBytes, 0, \$terminationBytes.Length)
                     \$global:sslStream.Flush()
-                    Start-Sleep -Milliseconds 200
+                    Start-Sleep -Milliseconds 3000
                 }
                 
                 # Proper SSL shutdown
