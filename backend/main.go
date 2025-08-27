@@ -382,18 +382,22 @@ func main() {
 			log.Printf("⚠️  WARNING: API port and unified port are the same - API will be served through TLS")
 		}
 	} else {
+		// In separated mode, allow same ports since we support protocol multiplexing
 		if config.Server.APIPort == config.Server.C2DefaultPort {
-			log.Fatalf("API port (%d) and C2 default port (%d) cannot be the same in separated mode", config.Server.APIPort, config.Server.C2DefaultPort)
+			log.Printf("🔀 MULTIPLEXED MODE: API (%d) and C2 (%d) using same port - protocol multiplexing enabled",
+				config.Server.APIPort, config.Server.C2DefaultPort)
+			log.Printf("⚠️  Note: VNC traffic will be auto-detected and routed to VNC handler")
+		} else {
+			log.Printf("🔌 SEPARATED MODE: API on port %s, C2 listeners on separate ports", apiPort)
 		}
-		log.Printf("🔌 SEPARATED MODE: API on port %s, C2 listeners on separate ports", apiPort)
 	}
 
 	log.Printf("Starting MuliC2 server on port %s", apiPort)
 	log.Printf("C2 listeners will use port %s by default", c2Port)
 	log.Printf("⚠️  IMPORTANT: C2 listeners will ONLY use the exact ports specified in profiles - NO FALLBACK PORTS!")
 
-	// Test if API port is available (only in separated mode)
-	if !config.Server.APIUnified {
+	// Test if API port is available (only in separated mode when ports are different)
+	if !config.Server.APIUnified && config.Server.APIPort != config.Server.C2DefaultPort {
 		testListener, err := net.Listen("tcp", ":"+apiPort)
 		if err != nil {
 			log.Fatalf("❌ FAILED: Cannot bind to API port %s: %v", apiPort, err)
