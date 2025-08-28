@@ -9,16 +9,20 @@ import (
 // AuthMiddleware creates middleware for JWT authentication
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header
+		var tokenString string
+
+		// First, try to get token from Authorization header
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "No authorization header", http.StatusUnauthorized)
-			return
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		} else {
+			// If Authorization header is missing or invalid, try query parameter
+			tokenString = r.URL.Query().Get("token")
 		}
 
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			http.Error(w, "Invalid authorization header format", http.StatusUnauthorized)
+		// If no token found in either location, return unauthorized
+		if tokenString == "" {
+			http.Error(w, "No authorization token provided", http.StatusUnauthorized)
 			return
 		}
 
