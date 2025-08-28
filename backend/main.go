@@ -57,6 +57,19 @@ type Config struct {
 	} `json:"logging"`
 }
 
+// VNCConnection represents a VNC connection
+type VNCConnection struct {
+	ConnectionID string    `json:"connection_id"`
+	Hostname     string    `json:"hostname"`
+	AgentIP      string    `json:"agent_ip"`
+	Resolution   string    `json:"resolution"`
+	FPS          int       `json:"fps"`
+	ConnectedAt  time.Time `json:"connected_at"`
+}
+
+// Global VNC connections storage (in a real implementation, this would be part of your VNC service)
+var activeVNCConnections = make(map[string]*VNCConnection)
+
 // loadConfig loads configuration from config.json
 func loadConfig() (*Config, error) {
 	configFile := "config.json"
@@ -305,7 +318,16 @@ func main() {
 
 	// VNC endpoints (protected)
 	api.Handle("/vnc/connections", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		connections := listenerService.GetVNCService().GetActiveConnections()
+		log.Printf("VNC connections endpoint called")
+
+		// Convert map to slice for JSON response
+		var connections []VNCConnection
+		for _, conn := range activeVNCConnections {
+			connections = append(connections, *conn)
+		}
+
+		log.Printf("Returning %d active VNC connections", len(connections))
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"connections": connections,
@@ -314,37 +336,50 @@ func main() {
 
 	// VNC frame streaming endpoint (Server-Sent Events)
 	api.Handle("/vnc/stream", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC stream endpoint called")
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// Get VNC service
-		vncService := listenerService.GetVNCService()
-		frameChannel := vncService.GetFrameChannel()
+		// For now, send a test message to verify the connection works
+		// In a real implementation, you would get frames from your VNC service
 
 		// Create a channel to detect client disconnect
-		notify := w.(http.CloseNotifier).CloseNotify()
+		notify := r.Context().Done()
+
+		// Send initial connection message
+		fmt.Fprintf(w, "data: %s\n\n", `{"status":"connected","message":"VNC stream ready"}`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		// Keep connection alive and send periodic test frames
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
 
 		for {
 			select {
-			case frame := <-frameChannel:
-				// Send frame data as SSE
-				frameData := map[string]interface{}{
-					"connection_id": frame.ConnectionID,
-					"timestamp":     frame.Timestamp,
-					"width":         frame.Width,
-					"height":        frame.Height,
-					"data":          frame.Data,
-					"size":          frame.Size,
+			case <-ticker.C:
+				// Send a test frame (in real implementation, this would come from VNC service)
+				testFrame := map[string]interface{}{
+					"connection_id": "test-vnc",
+					"timestamp":     time.Now().Unix(),
+					"width":         200,
+					"height":        150,
+					"image_data":    "", // Empty for now
+					"size":          0,
 				}
 
-				frameJSON, _ := json.Marshal(frameData)
+				frameJSON, _ := json.Marshal(testFrame)
 				fmt.Fprintf(w, "data: %s\n\n", frameJSON)
-				w.(http.Flusher).Flush()
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
 
 			case <-notify:
-				// Client disconnected
+				log.Printf("VNC stream client disconnected")
 				return
 			}
 		}
