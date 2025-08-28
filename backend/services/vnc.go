@@ -389,3 +389,30 @@ func (vs *VNCService) Shutdown() {
 	vs.CloseAllConnections()
 	close(vs.frameChannel)
 }
+
+// ForwardInputEvent forwards input event data to the agent's connection
+func (vs *VNCService) ForwardInputEvent(connectionID string, data []byte) error {
+	vs.mu.RLock()
+	conn, exists := vs.connections[connectionID]
+	vs.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("VNC connection %s not found", connectionID)
+	}
+	conn.mu.RLock()
+	isActive := conn.IsActive
+	netConn := conn.conn
+	conn.mu.RUnlock()
+	if !isActive || netConn == nil {
+		return fmt.Errorf("VNC connection %s is not active", connectionID)
+	}
+	// Write the event data to the agent's connection
+	n, err := netConn.Write(data)
+	if err != nil {
+		log.Printf("Failed to forward input event to agent (%s): %v", connectionID, err)
+		return err
+	}
+	if n != len(data) {
+		log.Printf("Partial write for input event to agent (%s): %d/%d bytes", connectionID, n, len(data))
+	}
+	return nil
+}

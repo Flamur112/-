@@ -20,6 +20,7 @@ import (
 	"mulic2/utils"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
 )
 
@@ -632,6 +633,68 @@ func main() {
 			"message": "VNC connection terminated",
 		})
 	}))).Methods("DELETE")
+
+	// WebSocket endpoint for VNC input events
+	api.HandleFunc("/vnc/input/ws", func(w http.ResponseWriter, r *http.Request) {
+		// Authenticate user (reuse AuthMiddleware logic)
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("token")
+		} else if strings.HasPrefix(tokenString, "Bearer ") {
+			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+		}
+		if tokenString == "" {
+			http.Error(w, "No authorization token provided", http.StatusUnauthorized)
+			return
+		}
+		claims, err := utils.ValidateJWT(tokenString)
+		if err != nil {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+		_, _, _, err = utils.ExtractUserFromJWT(claims)
+		if err != nil {
+			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+			return
+		}
+
+		// Get connection_id from query
+		connectionID := r.URL.Query().Get("connection_id")
+		if connectionID == "" {
+			http.Error(w, "Missing connection_id", http.StatusBadRequest)
+			return
+		}
+
+		// Upgrade to WebSocket
+		upgrader := websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		}
+		wsConn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("WebSocket upgrade failed: %v", err)
+			return
+		}
+		defer wsConn.Close()
+
+		log.Printf("VNC input WebSocket connected for connection_id: %s", connectionID)
+
+		// Forward input events to the VNC agent
+		for {
+			_, message, err := wsConn.ReadMessage()
+			if err != nil {
+				log.Printf("WebSocket read error: %v", err)
+				break
+			}
+			// Forward the raw message to the VNCService for routing
+			if vncService := listenerService.GetVNCService(); vncService != nil {
+				err := vncService.ForwardInputEvent(connectionID, message)
+				if err != nil {
+					log.Printf("Failed to forward input event: %v", err)
+				}
+			}
+		}
+		log.Printf("VNC input WebSocket disconnected for connection_id: %s", connectionID)
+	})
 
 	// Health check endpoint
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {

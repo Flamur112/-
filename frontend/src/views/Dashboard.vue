@@ -517,7 +517,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 // Types
@@ -1038,6 +1038,47 @@ param(
     [int]\$C2Port = ${c2Port}
 )
 
+# --- Input Event Simulation Helpers ---
+function Invoke-MouseEvent {
+    param(
+        [string]\$event,
+        [float]\$x,
+        [float]\$y,
+        [int]\$button = 0
+    )
+    Add-Type -AssemblyName System.Windows.Forms
+    \$screenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
+    \$screenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
+    \$px = [int](\$x * \$screenWidth)
+    \$py = [int](\$y * \$screenHeight)
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(\$px, \$py)
+    \$inputSimulator = Add-Type -MemberDefinition @'
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
+'@ -Name "Win32Mouse" -Namespace Win32Functions -PassThru
+    \$MOUSEEVENTF_LEFTDOWN = 0x02
+    \$MOUSEEVENTF_LEFTUP = 0x04
+    \$MOUSEEVENTF_RIGHTDOWN = 0x08
+    \$MOUSEEVENTF_RIGHTUP = 0x10
+    if (\$event -eq 'mousedown' -or \$event -eq 'mouseup' -or \$event -eq 'click') {
+        if (\$button -eq 0) {
+            \$inputSimulator::mouse_event(\$MOUSEEVENTF_LEFTDOWN, \$px, \$py, 0, 0)
+            \$inputSimulator::mouse_event(\$MOUSEEVENTF_LEFTUP, \$px, \$py, 0, 0)
+        } elseif (\$button -eq 2) {
+            \$inputSimulator::mouse_event(\$MOUSEEVENTF_RIGHTDOWN, \$px, \$py, 0, 0)
+            \$inputSimulator::mouse_event(\$MOUSEEVENTF_RIGHTUP, \$px, \$py, 0, 0)
+        }
+    }
+}
+function Invoke-KeyboardEvent {
+    param(
+        [string]\$key
+    )
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.SendKeys]::SendWait(\$key)
+}
+# --- End Helpers ---
+
 # Add required assemblies with error handling
 try {
     Add-Type -AssemblyName System.Drawing
@@ -1382,63 +1423,54 @@ const connectToVNCStream = async () => {
 // Start receiving VNC frames via Server-Sent Events
 const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
-  
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
   const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
-    eventSource.onmessage = (event) => {
+  eventSource.onmessage = (event) => {
     try {
-      const frame = JSON.parse(event.data)
-      processVNCFrame(frame)
+      // Declare frame at the top before any use
+      const frame: any = JSON.parse(event.data)
+      (window as any).lastVncFrame = frame
+      // Inline processVNCFrame logic
+      vncFrameCount.value++
+      const currentTime = Date.now()
+      const lastFrameTime = (window as any).lastFrameTime || currentTime
+      vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime))
+      ;(window as any).lastFrameTime = currentTime
+      // Render frame to canvas
+      if (vncCanvas.value && frame.image_data) {
+        try {
+          const canvas = vncCanvas.value
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            // Create image from base64 data
+            const img = new Image()
+            img.onload = () => {
+              // Clear canvas and draw new frame
+              ctx.clearRect(0, 0, canvas.width, canvas.height)
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            }
+            // Handle both base64 with and without data URL prefix
+            const imageData = frame.image_data.startsWith('data:') 
+              ? frame.image_data 
+              : `data:image/jpeg;base64,${frame.image_data}`
+            img.src = imageData
+          }
+        } catch (error) {
+          console.error('Error rendering VNC frame:', error)
+        }
+      }
+      console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`)
     } catch (error) {
       console.error('Error processing VNC frame:', error)
     }
   }
-  
   eventSource.onerror = (error) => {
     console.error('VNC stream error:', error)
     ElMessage.error('VNC stream connection lost')
     eventSource.close()
   }
-  
   // Store event source for cleanup
   ;(window as any).vncEventSource = eventSource
-}
-
-// Process incoming VNC frame
-const processVNCFrame = (frame: any) => {
-  vncFrameCount.value++
-  const currentTime = Date.now()
-  const lastFrameTime = (window as any).lastFrameTime || currentTime
-  vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime))
-  ;(window as any).lastFrameTime = currentTime
-  
-  // Render frame to canvas
-  if (vncCanvas.value && frame.image_data) {
-    try {
-      const canvas = vncCanvas.value
-      const ctx = canvas.getContext('2d')
-      
-      if (ctx) {
-        // Create image from base64 data
-        const img = new Image()
-        img.onload = () => {
-          // Clear canvas and draw new frame
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        }
-        
-        // Handle both base64 with and without data URL prefix
-        const imageData = frame.image_data.startsWith('data:') 
-          ? frame.image_data 
-          : `data:image/jpeg;base64,${frame.image_data}`
-        img.src = imageData
-      }
-    } catch (error) {
-      console.error('Error rendering VNC frame:', error)
-    }
-  }
-  
-  console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`)
 }
 
 const stopVncViewer = () => {
@@ -1675,6 +1707,162 @@ const refreshListeners = async () => {
     ElMessage.error('Failed to refresh listeners')
   }
 }
+
+// VNC Input WebSocket
+let vncInputSocket: WebSocket | null = null
+let vncInputConnectionId: string | null = null
+
+function getVncInputConnectionId() {
+  // Use the current VNC agent info's connection_id if available
+  // This should match the backend's VNC connection ID
+  if ((window as any).lastVncFrame && (window as any).lastVncFrame.connection_id) {
+    return (window as any).lastVncFrame.connection_id
+  }
+  // No fallback to vncAgentInfo, as it does not have connection_id
+  return null
+}
+
+function openVncInputSocket() {
+  if (vncInputSocket) return
+  const token = localStorage.getItem('auth_token')
+  // Try to get the connection_id from the last VNC frame or agent info
+  vncInputConnectionId = getVncInputConnectionId()
+  if (!token || !vncInputConnectionId) return
+  const wsUrl = `${API_BASE_URL.replace('http', 'ws')}/api/vnc/input/ws?token=${token}&connection_id=${vncInputConnectionId}`
+  vncInputSocket = new WebSocket(wsUrl)
+  vncInputSocket.onopen = () => {
+    console.log('VNC input WebSocket connected')
+  }
+  vncInputSocket.onclose = () => {
+    console.log('VNC input WebSocket closed')
+    vncInputSocket = null
+  }
+  vncInputSocket.onerror = (e) => {
+    console.error('VNC input WebSocket error', e)
+    vncInputSocket = null
+  }
+}
+
+function closeVncInputSocket() {
+  if (vncInputSocket) {
+    vncInputSocket.close()
+    vncInputSocket = null
+  }
+}
+
+function sendVncInputEvent(event: any) {
+  if (!vncInputSocket || vncInputSocket.readyState !== 1) return
+  vncInputSocket.send(JSON.stringify(event))
+}
+
+function handleVncMouseEvent(e: MouseEvent) {
+  if (!vncViewerActive.value || !vncConnected.value) return
+  const canvas = vncCanvas.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = ((e.clientX - rect.left) / rect.width)
+  const y = ((e.clientY - rect.top) / rect.height)
+  const event = {
+    type: 'mouse',
+    event: e.type,
+    x,
+    y,
+    button: e.button,
+    buttons: e.buttons,
+    ctrlKey: e.ctrlKey,
+    shiftKey: e.shiftKey,
+    altKey: e.altKey,
+    metaKey: e.metaKey,
+    connection_id: vncInputConnectionId
+  }
+  sendVncInputEvent(event)
+}
+
+function handleVncWheelEvent(e: WheelEvent) {
+  if (!vncViewerActive.value || !vncConnected.value) return
+  const canvas = vncCanvas.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = ((e.clientX - rect.left) / rect.width)
+  const y = ((e.clientY - rect.top) / rect.height)
+  const event = {
+    type: 'mouse',
+    event: 'wheel',
+    x,
+    y,
+    deltaX: e.deltaX,
+    deltaY: e.deltaY,
+    deltaZ: e.deltaZ,
+    ctrlKey: e.ctrlKey,
+    shiftKey: e.shiftKey,
+    altKey: e.altKey,
+    metaKey: e.metaKey,
+    connection_id: vncInputConnectionId
+  }
+  sendVncInputEvent(event)
+}
+
+function handleVncKeyboardEvent(e: KeyboardEvent) {
+  if (!vncViewerActive.value || !vncConnected.value) return
+  const event = {
+    type: 'keyboard',
+    event: e.type,
+    key: e.key,
+    code: e.code,
+    keyCode: e.keyCode,
+    ctrlKey: e.ctrlKey,
+    shiftKey: e.shiftKey,
+    altKey: e.altKey,
+    metaKey: e.metaKey,
+    connection_id: vncInputConnectionId
+  }
+  sendVncInputEvent(event)
+}
+
+function attachVncInputListeners() {
+  const canvas = vncCanvas.value
+  if (!canvas) return
+  canvas.addEventListener('mousedown', handleVncMouseEvent)
+  canvas.addEventListener('mouseup', handleVncMouseEvent)
+  canvas.addEventListener('mousemove', handleVncMouseEvent)
+  canvas.addEventListener('click', handleVncMouseEvent)
+  canvas.addEventListener('dblclick', handleVncMouseEvent)
+  canvas.addEventListener('wheel', handleVncWheelEvent)
+  window.addEventListener('keydown', handleVncKeyboardEvent)
+  window.addEventListener('keyup', handleVncKeyboardEvent)
+}
+
+function detachVncInputListeners() {
+  const canvas = vncCanvas.value
+  if (!canvas) return
+  canvas.removeEventListener('mousedown', handleVncMouseEvent)
+  canvas.removeEventListener('mouseup', handleVncMouseEvent)
+  canvas.removeEventListener('mousemove', handleVncMouseEvent)
+  canvas.removeEventListener('click', handleVncMouseEvent)
+  canvas.removeEventListener('dblclick', handleVncMouseEvent)
+  canvas.removeEventListener('wheel', handleVncWheelEvent)
+  window.removeEventListener('keydown', handleVncKeyboardEvent)
+  window.removeEventListener('keyup', handleVncKeyboardEvent)
+}
+
+watch([vncViewerActive, vncConnected], ([active, connected]) => {
+  if (active && connected) {
+    // Wait for the first VNC frame to get the connection_id
+    setTimeout(() => {
+      vncInputConnectionId = getVncInputConnectionId()
+      openVncInputSocket()
+      attachVncInputListeners()
+    }, 500)
+  } else {
+    detachVncInputListeners()
+    closeVncInputSocket()
+  }
+})
+
+onUnmounted(() => {
+  detachVncInputListeners()
+  closeVncInputSocket()
+})
 </script>
 
 <style scoped lang="scss">
