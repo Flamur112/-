@@ -1437,6 +1437,55 @@ const processVNCFrame = (frame: any) => {
   console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`)
 }
 
+// Alternative polling approach if SSE doesn't work
+let pollingInterval: any = null
+const startVNCPolling = async () => {
+  console.log('Starting VNC polling fallback...')
+  
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+  }
+  
+  const pollForFrames = async () => {
+    try {
+      // Try to get the latest VNC frame via REST API
+      const response = await authenticatedFetch('/api/vnc/latest-frame')
+      
+      if (response.ok) {
+        const frameData = await response.json()
+        console.log('Polling received frame:', frameData)
+        
+        if (frameData.image_data) {
+          processVNCFrame(frameData)
+          vncConnected.value = true
+          
+          // Update agent info if provided
+          if (frameData.hostname || frameData.agent_ip) {
+            vncAgentInfo.value = {
+              hostname: frameData.hostname || vncAgentInfo.value.hostname,
+              ip: frameData.agent_ip || vncAgentInfo.value.ip,
+              resolution: frameData.resolution || vncAgentInfo.value.resolution,
+              fps: frameData.fps?.toString() || vncAgentInfo.value.fps
+            }
+          }
+        }
+      } else if (response.status === 404) {
+        console.log('No VNC frames available yet')
+      } else {
+        console.error('VNC polling failed:', response.status)
+      }
+    } catch (error) {
+      console.error('VNC polling error:', error)
+    }
+  }
+  
+  // Poll every 200ms (5 FPS)
+  pollingInterval = setInterval(pollForFrames, 200)
+  
+  // Initial poll
+  await pollForFrames()
+}
+
 const stopVncViewer = () => {
   vncViewerActive.value = false
   ElMessage.success('VNC viewer stopped')
