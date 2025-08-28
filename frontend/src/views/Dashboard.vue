@@ -1525,6 +1525,12 @@ const startVNCStream = () => {
         }
       }
       console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`);
+      // --- NEW: Open VNC input WebSocket after first valid frame with connection_id ---
+      if (!vncInputSocket && frame.connection_id) {
+        vncInputConnectionId = frame.connection_id;
+        openVncInputSocket();
+        attachVncInputListeners();
+      }
     } catch (error) {
       console.error('Error processing VNC frame:', error, event.data);
     }
