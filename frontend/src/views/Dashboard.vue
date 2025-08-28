@@ -1427,41 +1427,47 @@ const startVNCStream = () => {
   const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
   eventSource.onmessage = (event) => {
     try {
-      // Declare frame at the top before any use
-      const frame: any = JSON.parse(event.data)
-      (window as any).lastVncFrame = frame
+      if (!event.data) return;
+      const obj = JSON.parse(event.data);
+      if (!obj.image_data) {
+        // Not a VNC frame, maybe a status or control message
+        console.log('Received non-frame message:', obj);
+        return;
+      }
+      const frame = obj;
+      (window as any).lastVncFrame = frame;
       // Inline processVNCFrame logic
-      vncFrameCount.value++
-      const currentTime = Date.now()
-      const lastFrameTime = (window as any).lastFrameTime || currentTime
-      vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime))
-      ;(window as any).lastFrameTime = currentTime
+      vncFrameCount.value++;
+      const currentTime = Date.now();
+      const lastFrameTime = (window as any).lastFrameTime || currentTime;
+      vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime));
+      ;(window as any).lastFrameTime = currentTime;
       // Render frame to canvas
       if (vncCanvas.value && frame.image_data) {
         try {
-          const canvas = vncCanvas.value
-          const ctx = canvas.getContext('2d')
+          const canvas = vncCanvas.value;
+          const ctx = canvas.getContext('2d');
           if (ctx) {
             // Create image from base64 data
-            const img = new Image()
+            const img = new Image();
             img.onload = () => {
               // Clear canvas and draw new frame
-              ctx.clearRect(0, 0, canvas.width, canvas.height)
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-            }
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            };
             // Handle both base64 with and without data URL prefix
             const imageData = frame.image_data.startsWith('data:') 
               ? frame.image_data 
-              : `data:image/jpeg;base64,${frame.image_data}`
-            img.src = imageData
+              : `data:image/jpeg;base64,${frame.image_data}`;
+            img.src = imageData;
           }
         } catch (error) {
-          console.error('Error rendering VNC frame:', error)
+          console.error('Error rendering VNC frame:', error);
         }
       }
-      console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`)
+      console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`);
     } catch (error) {
-      console.error('Error processing VNC frame:', error)
+      console.error('Error processing VNC frame:', error, event.data);
     }
   }
   eventSource.onerror = (error) => {
