@@ -329,12 +329,12 @@ func main() {
 			vncConnections := vncService.GetActiveConnections()
 			for _, conn := range vncConnections {
 				connections = append(connections, VNCConnection{
-					ConnectionID: conn.ConnectionID,
-					Hostname:     conn.Hostname,
-					AgentIP:      conn.AgentIP,
-					Resolution:   conn.Resolution,
-					FPS:          conn.FPS,
-					ConnectedAt:  conn.ConnectedAt,
+					ConnectionID: conn["id"].(string),
+					Hostname:     conn["hostname"].(string),
+					AgentIP:      conn["agent_ip"].(string),
+					Resolution:   conn["resolution"].(string),
+					FPS:          conn["fps"].(int),
+					ConnectedAt:  conn["connected_at"].(time.Time),
 				})
 			}
 		} else {
