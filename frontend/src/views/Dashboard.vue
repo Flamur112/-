@@ -1344,7 +1344,7 @@ const connectToVNCStream = async () => {
   try {
 
     // First check for active VNC connections
-    const response = await authenticatedFetch('/api/vnc/connections')
+    const response = await authenticatedFetch('/vnc/connections')
     if (!response.ok) {
       throw new Error(`Failed to get VNC connections: ${response.status}`)
     }
