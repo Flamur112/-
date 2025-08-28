@@ -1344,8 +1344,8 @@ const connectToVNCStream = async () => {
   try {
 
     // First check for active VNC connections
-    const response = await authenticatedFetch('/vnc/connections')
-    if (!response.ok) {
+    const response = await authenticatedFetch('/api/vnc/connections')
+        if (!response.ok) {
       throw new Error(`Failed to get VNC connections: ${response.status}`)
     }
     
@@ -1380,8 +1380,8 @@ const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
-  const eventSource = new EventSource(`${API_BASE_URL}/vnc/stream?token=${token}`)  
-  eventSource.onmessage = (event) => {
+  const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
+    eventSource.onmessage = (event) => {
     try {
       const frame = JSON.parse(event.data)
       processVNCFrame(frame)
