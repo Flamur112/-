@@ -1400,7 +1400,7 @@ const startVNCStream = () => {
   ;(window as any).vncEventSource = eventSource
 }
 
-// Process incoming VNC frame
+// Process incoming VNC frame AKA the video that we see from the reverse vnc
 const processVNCFrame = (frame: any) => {
   vncFrameCount.value++
   const currentTime = Date.now()
@@ -1408,9 +1408,33 @@ const processVNCFrame = (frame: any) => {
   vncCurrentFps.value = Math.floor(1000 / (currentTime - lastFrameTime))
   ;(window as any).lastFrameTime = currentTime
   
-  // TODO: Render frame to canvas
-  // For now, just update the frame counter
-  console.log(`Received VNC frame: ${frame.size} bytes from ${frame.connection_id}`)
+  // Render frame to canvas
+  if (vncCanvas.value && frame.image_data) {
+    try {
+      const canvas = vncCanvas.value
+      const ctx = canvas.getContext('2d')
+      
+      if (ctx) {
+        // Create image from base64 data
+        const img = new Image()
+        img.onload = () => {
+          // Clear canvas and draw new frame
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        }
+        
+        // Handle both base64 with and without data URL prefix
+        const imageData = frame.image_data.startsWith('data:') 
+          ? frame.image_data 
+          : `data:image/jpeg;base64,${frame.image_data}`
+        img.src = imageData
+      }
+    } catch (error) {
+      console.error('Error rendering VNC frame:', error)
+    }
+  }
+  
+  console.log(`Rendered VNC frame: ${frame.size || 'unknown'} bytes from ${frame.connection_id || 'unknown'}`)
 }
 
 const stopVncViewer = () => {
