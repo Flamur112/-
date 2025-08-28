@@ -380,12 +380,17 @@ func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
 
 // handleConnection handles an individual client connection
 func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance) {
+	var connectionHandedOff bool = false
+
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic in handleConnection: %v", r)
 		}
-		conn.Close()
+		// CRITICAL FIX: Only close connection if it wasn't handed off to another service
+		if !connectionHandedOff {
+			conn.Close()
+		}
 	}()
 
 	remoteAddr := conn.RemoteAddr().String()
@@ -408,8 +413,9 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
 	if vncDetected {
 		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
+		connectionHandedOff = true // CRITICAL: Mark connection as handed off
 		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
-		return
+		return // Connection is now owned by VNC service, defer won't close it
 	}
 	log.Printf("🔍 DEBUG: VNC detection completed, not a VNC connection")
 
@@ -437,13 +443,15 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 					reader: reader,
 				}
 
+				connectionHandedOff = true // Mark connection as handed off
 				// Handle HTTP request directly
 				ls.handleHTTPRequest(httpConn)
-				return
+				return // Connection is now owned by HTTP handler
 			}
 		}
 	}
 
+	// If we reach here, it's a regular C2 connection - connection will be closed by defer when done
 	// Send welcome message with connection details
 	profileName := "unknown"
 	if instance.profile != nil {
@@ -472,6 +480,7 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 		}
 
 		// Handle special commands
+		// Where we handl multiple different connections such as HTTP, VNC, if they get detected handled properly
 		switch command {
 		case "exit", "quit":
 			log.Printf("Client %s requested disconnect", remoteAddr)
@@ -499,6 +508,7 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 			conn.Write([]byte(response))
 		}
 	}
+	// When this function ends, defer will close the connection (but only if not handed off)
 }
 
 // httpConn wraps a net.Conn with a buffered reader for HTTP requests
