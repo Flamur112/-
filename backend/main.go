@@ -461,6 +461,75 @@ func main() {
 		}
 	}))).Methods("GET")
 
+	// ADDITION: Register /api/vnc/stream endpoint for frontend compatibility
+	api.Handle("/api/vnc/stream", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("/api/vnc/stream endpoint called")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Create a channel to detect client disconnect
+		notify := r.Context().Done()
+		// Send initial connection message
+		fmt.Fprintf(w, "data: %s\n\n", `{"status":"connected","message":"VNC stream ready"}`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		if vncService := listenerService.GetVNCService(); vncService != nil {
+			frameChannel := vncService.GetFrameChannel()
+			for {
+				select {
+				case frame, ok := <-frameChannel:
+					if !ok {
+						log.Printf("VNC frame channel closed (/api/vnc/stream)")
+						return
+					}
+					frameData := map[string]interface{}{
+						"connection_id": frame.ConnectionID,
+						"timestamp":     frame.Timestamp,
+						"width":         frame.Width,
+						"height":        frame.Height,
+						"image_data":    frame.Data,
+						"size":          frame.Size,
+					}
+					frameJSON, _ := json.Marshal(frameData)
+					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				case <-notify:
+					log.Printf("/api/vnc/stream client disconnected")
+					return
+				}
+			}
+		} else {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					testFrame := map[string]interface{}{
+						"connection_id": "test-vnc",
+						"timestamp":     time.Now().Unix(),
+						"width":         800,
+						"height":        600,
+						"image_data":    "",
+						"size":          0,
+						"status":        "test_mode",
+					}
+					frameJSON, _ := json.Marshal(testFrame)
+					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				case <-notify:
+					log.Printf("/api/vnc/stream client disconnected")
+					return
+				}
+			}
+		}
+	}))).Methods("GET")
+
 	// VNC connection control endpoints
 	api.Handle("/vnc/connect", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
