@@ -1400,7 +1400,7 @@ const startVNCStream = () => {
   ;(window as any).vncEventSource = eventSource
 }
 
-// Process incoming VNC frame AKA the video that we see from the reverse vnc
+// Process incoming VNC frame
 const processVNCFrame = (frame: any) => {
   vncFrameCount.value++
   const currentTime = Date.now()
