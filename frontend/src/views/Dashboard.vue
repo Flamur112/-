@@ -1249,6 +1249,7 @@ try {
     # --- Start Input Event Listener Job ---
     $inputJob = Start-Job -ScriptBlock {
         param($sslStream)
+        Write-Host "[*] Input event listener job started" -ForegroundColor Magenta
         while ($global:isRunning -and $sslStream -and $sslStream.CanRead) {
             try {
                 # Read 4-byte length header
