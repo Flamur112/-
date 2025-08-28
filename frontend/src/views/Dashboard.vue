@@ -420,7 +420,11 @@
                   <span>Frame: {{ vncFrameCount }}</span>
                 </div>
               </div>
-    </div>
+            </div>
+            <!-- Add CTRL+ALT+DEL button below VNC controls -->
+            <div v-if="vncViewerActive && vncConnected" style="margin-bottom: 10px;">
+              <el-button type="danger" @click="sendCtrlAltDel" icon="el-icon-warning">Send CTRL+ALT+DELETE</el-button>
+            </div>
 
             <div v-if="!vncConnected" class="vnc-waiting">
               <el-empty description="Waiting for VNC Agent Connection">
@@ -1263,10 +1267,17 @@ try {
                 $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
                 $event = $null
                 try { $event = $json | ConvertFrom-Json } catch {}
-                if ($event -and $event.type -eq 'mouse') {
-                    Invoke-MouseEvent $event.event $event.x $event.y $event.button
-                } elseif ($event -and $event.type -eq 'keyboard') {
-                    Invoke-KeyboardEvent $event.key
+                if ($event) {
+                    Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
+                    if ($event.type -eq 'mouse') {
+                        Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                    } elseif ($event.type -eq 'keyboard') {
+                        if ($event.event -eq 'ctrlaltdel') {
+                            Invoke-KeyboardEvent 'ctrlaltdel'
+                        } else {
+                            Invoke-KeyboardEvent $event.key $event.event
+                        }
+                    }
                 }
             } catch {}
             Start-Sleep -Milliseconds 10
@@ -1902,6 +1913,17 @@ onUnmounted(() => {
   detachVncInputListeners()
   closeVncInputSocket()
 })
+
+function sendCtrlAltDel() {
+  if (!vncViewerActive.value || !vncConnected.value) return
+  const event = {
+    type: 'keyboard',
+    event: 'ctrlaltdel',
+    connection_id: vncInputConnectionId
+  }
+  sendVncInputEvent(event)
+  ElMessage.success('Sent CTRL+ALT+DELETE')
+}
 </script>
 
 <style scoped lang="scss">
