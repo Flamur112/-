@@ -424,6 +424,7 @@
             <!-- Add CTRL+ALT+DEL button below VNC controls -->
             <div v-if="vncViewerActive && vncConnected" style="margin-bottom: 10px;">
               <el-button type="danger" @click="sendCtrlAltDel" icon="el-icon-warning">Send CTRL+ALT+DELETE</el-button>
+              <el-button type="primary" @click="sendShowMessageBox" icon="el-icon-info">Show MessageBox</el-button>
             </div>
 
             <div v-if="!vncConnected" class="vnc-waiting">
@@ -1272,11 +1273,12 @@ try {
                     if ($event.type -eq 'mouse') {
                         Invoke-MouseEvent $event.event $event.x $event.y $event.button
                     } elseif ($event.type -eq 'keyboard') {
-                        if ($event.event -eq 'ctrlaltdel') {
-                            Invoke-KeyboardEvent 'ctrlaltdel'
-                        } else {
-                            Invoke-KeyboardEvent $event.key $event.event
-                        }
+                        # No longer handling ctrlaltdel
+                        Invoke-KeyboardEvent $event.key $event.event
+                    } elseif ($event.type -eq 'test' -and $event.event -eq 'show_messagebox') {
+                        # Show a Windows MessageBox for test confirmation
+                        Add-Type -AssemblyName System.Windows.Forms
+                        [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
                     }
                 }
             } catch {}
@@ -1923,6 +1925,17 @@ function sendCtrlAltDel() {
   }
   sendVncInputEvent(event)
   ElMessage.success('Sent CTRL+ALT+DELETE')
+}
+
+function sendShowMessageBox() {
+  if (!vncViewerActive.value || !vncConnected.value) return
+  const event = {
+    type: 'test',
+    event: 'show_messagebox',
+    connection_id: vncInputConnectionId
+  }
+  sendVncInputEvent(event)
+  ElMessage.success('Show MessageBox event sent')
 }
 </script>
 
