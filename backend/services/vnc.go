@@ -405,14 +405,18 @@ func (vs *VNCService) ForwardInputEvent(connectionID string, data []byte) error 
 	if !isActive || netConn == nil {
 		return fmt.Errorf("VNC connection %s is not active", connectionID)
 	}
-	// Write the event data to the agent's connection
-	n, err := netConn.Write(data)
+	// Prepend 4-byte little-endian length header to the data
+	length := uint32(len(data))
+	header := make([]byte, 4)
+	binary.LittleEndian.PutUint32(header, length)
+	packet := append(header, data...)
+	n, err := netConn.Write(packet)
 	if err != nil {
 		log.Printf("Failed to forward input event to agent (%s): %v", connectionID, err)
 		return err
 	}
-	if n != len(data) {
-		log.Printf("Partial write for input event to agent (%s): %d/%d bytes", connectionID, n, len(data))
+	if n != len(packet) {
+		log.Printf("Partial write for input event to agent (%s): %d/%d bytes", connectionID, n, len(packet))
 	}
 	return nil
 }
