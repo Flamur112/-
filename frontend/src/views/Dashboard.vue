@@ -1241,6 +1241,39 @@ try {
     Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
     Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray
     
+    # --- Start Input Event Listener Job ---
+    $inputJob = Start-Job -ScriptBlock {
+        param($sslStream)
+        while ($global:isRunning -and $sslStream -and $sslStream.CanRead) {
+            try {
+                # Read 4-byte length header
+                $lengthBytes = New-Object byte[] 4
+                $bytesRead = $sslStream.Read($lengthBytes, 0, 4)
+                if ($bytesRead -ne 4) { continue }
+                $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
+                if ($msgLength -le 0 -or $msgLength -gt 4096) { continue }
+                # Read message
+                $msgBytes = New-Object byte[] $msgLength
+                $read = 0
+                while ($read -lt $msgLength) {
+                    $n = $sslStream.Read($msgBytes, $read, $msgLength - $read)
+                    if ($n -le 0) { break }
+                    $read += $n
+                }
+                $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
+                $event = $null
+                try { $event = $json | ConvertFrom-Json } catch {}
+                if ($event -and $event.type -eq 'mouse') {
+                    Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                } elseif ($event -and $event.type -eq 'keyboard') {
+                    Invoke-KeyboardEvent $event.key
+                }
+            } catch {}
+            Start-Sleep -Milliseconds 10
+        }
+    } -ArgumentList $global:sslStream
+    # --- End Input Event Listener Job ---
+    
     # Main capture loop with comprehensive error handling
     \$frameCount = 0
     \$lastErrorTime = 0
