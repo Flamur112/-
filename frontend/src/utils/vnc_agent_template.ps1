@@ -67,8 +67,16 @@ public class Win32API {
     public static extern bool SetCursorPos(int X, int Y);
     [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
+    
     public const int MOUSEEVENTF_MOVE = 0x0001;
     public const int MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const int MOUSEEVENTF_LEFTUP = 0x0004;
@@ -77,8 +85,10 @@ public class Win32API {
     public const int MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const int MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const int MOUSEEVENTF_WHEEL = 0x0800;
+    public const int MOUSEEVENTF_ABSOLUTE = 0x8000;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_UNICODE = 0x0004;
+    public const int SW_RESTORE = 9;
 }
 "@
 
@@ -90,48 +100,110 @@ function Invoke-MouseEvent {
         [int]$button = 0,
         [int]$buttons = 0
     )
+    
     try {
         $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
         $realScreenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
-        $px = [int]($x * $realScreenWidth)
-        $py = [int]($y * $realScreenHeight)
-        Write-Host "[*] Mouse event: $event at screen coords ($px, $py) from relative ($x, $y)" -ForegroundColor Cyan
-        [Win32API]::SetCursorPos($px, $py)
-        Start-Sleep -Milliseconds 10
+        
+        # Convert relative coordinates (0.0-1.0) to absolute screen coordinates
+        $px = [Math]::Round($x * $realScreenWidth)
+        $py = [Math]::Round($y * $realScreenHeight)
+        
+        # Ensure coordinates are within screen bounds
+        $px = [Math]::Max(0, [Math]::Min($px, $realScreenWidth - 1))
+        $py = [Math]::Max(0, [Math]::Min($py, $realScreenHeight - 1))
+        
+        Write-Host "[*] Mouse event: $event at screen coords ($px, $py) from relative ($([Math]::Round($x,3)), $([Math]::Round($y,3)))" -ForegroundColor Cyan
+        
+        # Move cursor to position first
+        $moveSuccess = [Win32API]::SetCursorPos($px, $py)
+        if (-not $moveSuccess) {
+            Write-Host "[!] Failed to move cursor to ($px, $py)" -ForegroundColor Red
+            return
+        }
+        
+        # Add small delay to ensure cursor movement is processed
+        Start-Sleep -Milliseconds 25
+        
+        # Verify cursor position
+        $point = New-Object Win32API+POINT
+        [Win32API]::GetCursorPos([ref]$point)
+        Write-Host "[DEBUG] Cursor actually at: ($($point.X), $($point.Y))" -ForegroundColor DarkGray
+        
         switch ($event) {
             'mousedown' {
                 switch ($button) {
-                    0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); Write-Host "[+] Left mouse button down at ($px, $py)" -ForegroundColor Green }
-                    2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0); Write-Host "[+] Right mouse button down at ($px, $py)" -ForegroundColor Green }
-                    1 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0); Write-Host "[+] Middle mouse button down at ($px, $py)" -ForegroundColor Green }
-                } else {
-                Write-Host "[DEBUG] No SSL data available" -ForegroundColor DarkGray
-            }
+                    0 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                        Write-Host "[+] Left mouse button DOWN at ($px, $py)" -ForegroundColor Green 
+                    }
+                    2 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                        Write-Host "[+] Right mouse button DOWN at ($px, $py)" -ForegroundColor Green 
+                    }
+                    1 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0)
+                        Write-Host "[+] Middle mouse button DOWN at ($px, $py)" -ForegroundColor Green 
+                    }
+                }
             }
             'mouseup' {
                 switch ($button) {
-                    0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0); Write-Host "[+] Left mouse button up at ($px, $py)" -ForegroundColor Green }
-                    2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0); Write-Host "[+] Right mouse button up at ($px, $py)" -ForegroundColor Green }
-                    1 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0); Write-Host "[+] Middle mouse button up at ($px, $py)" -ForegroundColor Green }
+                    0 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                        Write-Host "[+] Left mouse button UP at ($px, $py)" -ForegroundColor Green 
+                    }
+                    2 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                        Write-Host "[+] Right mouse button UP at ($px, $py)" -ForegroundColor Green 
+                    }
+                    1 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0)
+                        Write-Host "[+] Middle mouse button UP at ($px, $py)" -ForegroundColor Green 
+                    }
                 }
             }
             'click' {
                 switch ($button) {
-                    0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); Start-Sleep -Milliseconds 50; [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0); Write-Host "[+] Left click executed at ($px, $py)" -ForegroundColor Green }
-                    2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0); Start-Sleep -Milliseconds 50; [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0); Write-Host "[+] Right click executed at ($px, $py)" -ForegroundColor Green }
+                    0 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                        Start-Sleep -Milliseconds 50
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+                        Write-Host "[+] Left CLICK executed at ($px, $py)" -ForegroundColor Green 
+                    }
+                    2 { 
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+                        Start-Sleep -Milliseconds 50
+                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+                        Write-Host "[+] Right CLICK executed at ($px, $py)" -ForegroundColor Green 
+                    }
                 }
             }
             'dblclick' {
+                # First click
                 [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                Start-Sleep -Milliseconds 25
                 [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                Start-Sleep -Milliseconds 50
+                
+                # Short delay between clicks
+                Start-Sleep -Milliseconds 25
+                
+                # Second click
                 [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+                Start-Sleep -Milliseconds 25
                 [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                Write-Host "[+] Double click executed at ($px, $py)" -ForegroundColor Green
+                
+                Write-Host "[+] Double CLICK executed at ($px, $py)" -ForegroundColor Green
+            }
+            'mousemove' {
+                # Cursor already moved above, just log
+                Write-Host "[+] Mouse moved to ($px, $py)" -ForegroundColor Green
             }
         }
+        
     } catch {
         Write-Host "[!] Mouse event simulation failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[!] Stack trace: $($_.Exception.StackTrace)" -ForegroundColor Red
     }
 }
 
@@ -145,12 +217,17 @@ function Invoke-KeyboardEvent {
         [bool]$shiftKey = $false,
         [bool]$altKey = $false
     )
+    
     try {
-        Write-Host "[*] Keyboard event: $event - Key: '$key' Code: '$code' KeyCode: $keyCode" -ForegroundColor Cyan
+        Write-Host "[*] Keyboard event: $event - Key: '$key' Code: '$code' KeyCode: $keyCode Ctrl:$ctrlKey Shift:$shiftKey Alt:$altKey" -ForegroundColor Cyan
+        
+        # Press modifier keys first
         if ($ctrlKey) { [Win32API]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero) }
         if ($shiftKey) { [Win32API]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero) }
         if ($altKey) { [Win32API]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) }
-        Start-Sleep -Milliseconds 10
+        
+        Start-Sleep -Milliseconds 25
+        
         $vkCode = 0
         switch ($key) {
             'Enter' { $vkCode = 0x0D }
@@ -182,36 +259,55 @@ function Invoke-KeyboardEvent {
             'Control' { $vkCode = 0x11 }
             'Alt' { $vkCode = 0x12 }
             'Shift' { $vkCode = 0x10 }
+            ' ' { $vkCode = 0x20 }  # Space key
             default {
                 if ($key.Length -eq 1) {
-                    $vkCode = [Win32API]::VkKeyScan($key[0]) -band 0xFF
+                    $vkResult = [Win32API]::VkKeyScan($key[0])
+                    $vkCode = $vkResult -band 0xFF
                 } elseif ($keyCode -ne 0) {
                     $vkCode = $keyCode
                 }
             }
         }
+        
         if ($vkCode -ne 0) {
             if ($event -eq 'keydown') {
                 [Win32API]::keybd_event([byte]$vkCode, 0, 0, [UIntPtr]::Zero)
-                Write-Host "[+] Key down: $key (VK: $vkCode)" -ForegroundColor Green
+                Write-Host "[+] Key DOWN: $key (VK: $vkCode)" -ForegroundColor Green
             } elseif ($event -eq 'keyup') {
                 [Win32API]::keybd_event([byte]$vkCode, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[+] Key up: $key (VK: $vkCode)" -ForegroundColor Green
+                Write-Host "[+] Key UP: $key (VK: $vkCode)" -ForegroundColor Green
+            } elseif ($event -eq 'keypress') {
+                # Full key press (down + up)
+                [Win32API]::keybd_event([byte]$vkCode, 0, 0, [UIntPtr]::Zero)
+                Start-Sleep -Milliseconds 25
+                [Win32API]::keybd_event([byte]$vkCode, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
+                Write-Host "[+] Key PRESS: $key (VK: $vkCode)" -ForegroundColor Green
             }
         } else {
+            # Fallback to SendKeys for characters
             if ($key.Length -eq 1) {
-                [System.Windows.Forms.SendKeys]::SendWait($key)
-                Write-Host "[+] Character sent via SendKeys: $key" -ForegroundColor Green
+                try {
+                    [System.Windows.Forms.SendKeys]::SendWait($key)
+                    Write-Host "[+] Character sent via SendKeys: $key" -ForegroundColor Green
+                } catch {
+                    Write-Host "[!] SendKeys failed for: $key - $($_.Exception.Message)" -ForegroundColor Red
+                }
             } else {
                 Write-Host "[!] Could not simulate key: $key" -ForegroundColor Red
             }
         }
-        Start-Sleep -Milliseconds 10
+        
+        Start-Sleep -Milliseconds 25
+        
+        # Release modifier keys in reverse order
         if ($altKey) { [Win32API]::keybd_event(0x12, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
         if ($shiftKey) { [Win32API]::keybd_event(0x10, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
         if ($ctrlKey) { [Win32API]::keybd_event(0x11, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
+        
     } catch {
         Write-Host "[!] Keyboard event simulation failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[!] Stack trace: $($_.Exception.StackTrace)" -ForegroundColor Red
     }
 }
 
@@ -309,11 +405,18 @@ try {
                                     }
                                 }
                             } catch { 
-                                Write-Host "[!] Failed to parse input event JSON: $json" -ForegroundColor Red 
+                                Write-Host "[!] Failed to parse input event JSON: $json" -ForegroundColor Red
+                                Write-Host "[!] JSON Parse Error: $($_.Exception.Message)" -ForegroundColor Red
                             }
                         }
+                    } else {
+                        Write-Host "[!] Invalid message length: $msgLength" -ForegroundColor Red
                     }
+                } else {
+                    Write-Host "[DEBUG] Could not read complete length header, got $totalRead bytes" -ForegroundColor DarkGray
                 }
+            } else {
+                Write-Host "[DEBUG] No SSL data available" -ForegroundColor DarkGray
             }
         } catch {
             # Input reading errors are non-fatal, just log and continue
