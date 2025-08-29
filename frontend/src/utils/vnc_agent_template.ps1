@@ -209,13 +209,19 @@ try {
     $inputJob = Start-Job -ScriptBlock {
         param($sslStream)
         Write-Host "[*] Input event listener job started" -ForegroundColor Magenta
+        $lastHeartbeat = Get-Date
         while ($true) {
             try {
+                $now = Get-Date
+                if (($now - $lastHeartbeat).TotalSeconds -ge 1) {
+                    Write-Host "[HEARTBEAT] Input event listener alive at $now" -ForegroundColor Yellow
+                    $lastHeartbeat = $now
+                }
                 $lengthBytes = New-Object byte[] 4
                 $bytesRead = $sslStream.Read($lengthBytes, 0, 4)
-                if ($bytesRead -ne 4) { continue }
+                if ($bytesRead -ne 4) { Start-Sleep -Milliseconds 10; continue }
                 $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
-                if ($msgLength -le 0 -or $msgLength -gt 4096) { continue }
+                if ($msgLength -le 0 -or $msgLength -gt 4096) { Start-Sleep -Milliseconds 10; continue }
                 $msgBytes = New-Object byte[] $msgLength
                 $read = 0
                 while ($read -lt $msgLength) {
@@ -226,7 +232,7 @@ try {
                 $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
                 Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
                 $event = $null
-                try { $event = $json | ConvertFrom-Json } catch {}
+                try { $event = $json | ConvertFrom-Json } catch { Write-Host "[!] Failed to parse input event JSON: $json" -ForegroundColor Red }
                 if ($event) {
                     if ($event.type -eq 'mouse') {
                         Invoke-MouseEvent $event.event $event.x $event.y $event.button
@@ -244,6 +250,7 @@ try {
                 }
             } catch {
                 Write-Host "[!] Exception in input event listener: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host $_.ScriptStackTrace -ForegroundColor Red
             }
             Start-Sleep -Milliseconds 10
         }
