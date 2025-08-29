@@ -104,7 +104,9 @@ function Invoke-MouseEvent {
                     0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); Write-Host "[+] Left mouse button down at ($px, $py)" -ForegroundColor Green }
                     2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0); Write-Host "[+] Right mouse button down at ($px, $py)" -ForegroundColor Green }
                     1 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0); Write-Host "[+] Middle mouse button down at ($px, $py)" -ForegroundColor Green }
-                }
+                } else {
+                Write-Host "[DEBUG] No SSL data available" -ForegroundColor DarkGray
+            }
             }
             'mouseup' {
                 switch ($button) {
@@ -264,6 +266,7 @@ try {
         # Check for input events (non-blocking)
         try {
             if ($global:sslStream.DataAvailable) {
+                Write-Host "[DEBUG] SSL stream has data available" -ForegroundColor Magenta
                 # Read message length header
                 $lengthBytes = New-Object byte[] 4
                 $totalRead = 0
@@ -288,6 +291,7 @@ try {
                         if ($totalRead -eq $msgLength) {
                             $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
                             Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
+                            Write-Host "[DEBUG] Message length: $msgLength, Total read: $totalRead" -ForegroundColor Magenta
                             
                             try { 
                                 $event = $json | ConvertFrom-Json 
