@@ -56,11 +56,11 @@ function Invoke-MouseEvent {
         [int]$buttons = 0
     )
     try {
-        $screenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
-        $screenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
-        $px = [int]($x * $screenWidth)
-        $py = [int]($y * $screenHeight)
-        Write-Host "[*] Mouse event: $event at screen coords ($px, $py) from relative ($x, $y)" -ForegroundColor Cyan
+        $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
+        $realScreenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
+        $px = [int]($x * $realScreenWidth)
+        $py = [int]($y * $realScreenHeight)
+        Write-Host "[*] Mouse event: $event at screen coords ($px, $py) from relative ($x, $y) [real screen: ${realScreenWidth}x${realScreenHeight}]" -ForegroundColor Cyan
         [Win32API]::SetCursorPos($px, $py)
         switch ($event) {
             'mousedown' {
@@ -251,27 +251,31 @@ try {
 
     # --- Screen Capture and Frame Sending Loop ---
     try {
+        $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
+        $realScreenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
         $targetWidth = 800
         $targetHeight = 600
         while ($global:isRunning) {
-            # Capture 800x600 region from top-left
+            # Capture full screen and scale to 800x600
+            $bmpFull = New-Object System.Drawing.Bitmap $realScreenWidth, $realScreenHeight
+            $graphicsFull = [System.Drawing.Graphics]::FromImage($bmpFull)
+            $graphicsFull.CopyFromScreen(0, 0, 0, 0, $bmpFull.Size)
             $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
             $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-            $graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size)
-
+            $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
             $ms = New-Object System.IO.MemoryStream
             $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
             $frameBytes = $ms.ToArray()
             $ms.Dispose()
             $graphics.Dispose()
             $bmp.Dispose()
-
+            $graphicsFull.Dispose()
+            $bmpFull.Dispose()
             # Send frame with 4-byte little-endian length header
             $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
             $global:sslStream.Write($lenBytes, 0, 4)
             $global:sslStream.Write($frameBytes, 0, $frameBytes.Length)
             $global:sslStream.Flush()
-
             Start-Sleep -Milliseconds 200  # ~5 FPS
         }
     } catch {
