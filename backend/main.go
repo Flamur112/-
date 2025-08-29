@@ -19,6 +19,8 @@ import (
 	"mulic2/services"
 	"mulic2/utils"
 
+	"bytes"
+
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
@@ -684,6 +686,16 @@ func main() {
 			if err != nil {
 				log.Printf("WebSocket read error: %v", err)
 				break
+			}
+			log.Printf("[VNC INPUT] Received input event for connection_id %s: %s", connectionID, string(message))
+			// Self-test echo logic
+			if bytes.Contains(message, []byte(`\"event\":\"selftest\"`)) || bytes.Contains(message, []byte(`"event":"selftest"`)) {
+				log.Printf("[VNC INPUT] Self-test event received, echoing confirmation to frontend.")
+				err := wsConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"test","event":"selftest-confirm"}`))
+				if err != nil {
+					log.Printf("[VNC INPUT] Failed to send selftest-confirm: %v", err)
+				}
+				continue
 			}
 			// Forward the raw message to the VNCService for routing
 			if vncService := listenerService.GetVNCService(); vncService != nil {
