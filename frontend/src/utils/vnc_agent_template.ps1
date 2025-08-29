@@ -251,17 +251,29 @@ try {
 
     # --- Screen Capture and Frame Sending Loop ---
     try {
+        $screenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
+        $screenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
         while ($global:isRunning) {
-            # Capture screen
-            $bmp = New-Object System.Drawing.Bitmap 200, 150
+            # Capture full screen
+            $bmpFull = New-Object System.Drawing.Bitmap $screenWidth, $screenHeight
+            $graphicsFull = [System.Drawing.Graphics]::FromImage($bmpFull)
+            $graphicsFull.CopyFromScreen(0, 0, 0, 0, $bmpFull.Size)
+
+            # Optionally resize to 200x150 for bandwidth
+            $targetWidth = 200
+            $targetHeight = 150
+            $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
             $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-            $graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size)
+            $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
+
             $ms = New-Object System.IO.MemoryStream
             $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
             $frameBytes = $ms.ToArray()
             $ms.Dispose()
             $graphics.Dispose()
             $bmp.Dispose()
+            $graphicsFull.Dispose()
+            $bmpFull.Dispose()
 
             # Send frame with 4-byte little-endian length header
             $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
