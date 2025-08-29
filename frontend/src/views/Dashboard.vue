@@ -1850,6 +1850,7 @@ const getTaskStatusColor = (status: string) => {
 
 // Initialize dashboard
 onMounted(() => {
+  console.log('[DEBUG] Dashboard.vue mounted')
   updateStats()
   loadDashboardData()
   loadProfiles() // Load profiles on mount
@@ -2011,6 +2012,7 @@ function closeVncInputSocket() {
 
 function sendVncInputEvent(event: any) {
   if (!vncInputSocket || vncInputSocket.readyState !== 1) return
+  console.log('[DEBUG] sendVncInputEvent called:', event)
   vncInputSocket.send(JSON.stringify(event))
 }
 
@@ -2101,9 +2103,11 @@ function attachVncInputListeners() {
   window.addEventListener('keydown', handleVncKeyboardEvent)
   window.addEventListener('keyup', handleVncKeyboardEvent)
   canvas.addEventListener('focus', () => {
+    vncDebug.value.canvasFocused = true
     console.log('🎯 VNC canvas focused - keyboard input ready')
     showInputFeedback('Canvas focused - keyboard input ready')
   })
+  vncDebug.value.listenerAttached = true
   console.log('🎮 VNC input listeners attached (mouse clicks & keyboard only)')
   showInputFeedback('Input listeners active - click and type to interact')
 }
@@ -2119,6 +2123,8 @@ function detachVncInputListeners() {
   canvas.removeEventListener('wheel', handleVncWheelEvent)
   window.removeEventListener('keydown', handleVncKeyboardEvent)
   window.removeEventListener('keyup', handleVncKeyboardEvent)
+  vncDebug.value.listenerAttached = false
+  vncDebug.value.canvasFocused = false
   if (feedbackTimeout) {
     clearTimeout(feedbackTimeout)
   }
@@ -2161,10 +2167,12 @@ watch([vncViewerActive, vncConnected], ([active, connected]) => {
       vncInputConnectionId = getVncInputConnectionId()
       openVncInputSocket()
       attachVncInputListeners()
+      vncDebug.value.agentHeartbeat = 'ready'
     }, 500)
   } else {
     detachVncInputListeners()
     closeVncInputSocket()
+    vncDebug.value.agentHeartbeat = 'not ready'
   }
 })
 
@@ -2196,6 +2204,69 @@ function handleVncWheelEvent(e: WheelEvent) {
   }
   sendVncInputEvent(event)
 }
+
+window.addEventListener('error', function(event) {
+  vncDebug.value.lastError = '[GLOBAL ERROR] ' + (event.error || event.message)
+  console.error('[GLOBAL ERROR]', event.error || event.message)
+})
+
+// Add VNC Debug Panel state
+const debugMode = ref(true)
+const vncDebug = ref({
+  listenerAttached: false,
+  canvasFocused: false,
+  wsStatus: 'disconnected',
+  lastInputEvent: null as any,
+  lastError: '',
+  agentHeartbeat: '',
+  lastConnectionId: '',
+})
+
+// Add self-test state
+const selfTestStatus = ref('idle') // idle | running | passed | failed
+let selfTestTimeout: number | null = null
+
+function runVncSelfTest() {
+  if (!vncInputSocket || vncInputSocket.readyState !== 1) {
+    selfTestStatus.value = 'failed'
+    vncDebug.value.lastError = 'Self-Test: Input WebSocket not open'
+    return
+  }
+  selfTestStatus.value = 'running'
+  vncDebug.value.lastError = ''
+  const testEvent = {
+    type: 'test',
+    event: 'selftest',
+    connection_id: vncInputConnectionId,
+    timestamp: Date.now(),
+    nonce: Math.random().toString(36).slice(2)
+  }
+  vncDebug.value.lastInputEvent = testEvent
+  vncInputSocket.send(JSON.stringify(testEvent))
+  // Wait for confirmation (echo or response)
+  if (selfTestTimeout) clearTimeout(selfTestTimeout)
+  selfTestTimeout = setTimeout(() => {
+    if (selfTestStatus.value === 'running') {
+      selfTestStatus.value = 'failed'
+      vncDebug.value.lastError = 'Self-Test: No confirmation received from agent'
+    }
+  }, 3000)
+}
+// Patch input WebSocket to listen for self-test confirmation
+document.addEventListener('DOMContentLoaded', () => {
+  if (vncInputSocket) {
+    vncInputSocket.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data)
+        if (data.type === 'test' && data.event === 'selftest-confirm') {
+          selfTestStatus.value = 'passed'
+          if (selfTestTimeout) clearTimeout(selfTestTimeout)
+        }
+      } catch {}
+    }
+  }
+})
+// Add Self-Test button to the debug panel in the template
 </script>
 
 <style scoped lang="scss">
