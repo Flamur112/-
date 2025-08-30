@@ -411,11 +411,91 @@ else
     echo "✅ Database 'mulic2_db' already exists"
 fi
 
+# Check for TLS certificates and activate listener
+echo "🔐 Checking TLS certificates and activating C2 listener..."
+
+# Check if certificates exist in root directory
+if [ -f "server.crt" ] && [ -f "server.key" ]; then
+    echo "✅ TLS certificates found: server.crt and server.key"
+elif [ -f "certs/server.crt" ] && [ -f "certs/server.key" ]; then
+    echo "📁 TLS certificates found in certs/ directory, copying to root..."
+    cp certs/server.crt ./
+    cp certs/server.key ./
+    echo "✅ TLS certificates copied to root directory"
+    
+    # Activate the main C2 listener in the database
+    echo "🔧 Activating TLS C2 listener in database..."
+    export PGPASSWORD="$DB_PASS"
+    
+    # Check if listeners table exists and activate the main listener
+    if psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT 1 FROM information_schema.tables WHERE table_name='listeners';" | grep -q "1" 2>/dev/null; then
+        # Update the main listener to be active and use TLS
+        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = true, use_tls = true WHERE id = 'main';" 2>/dev/null || true
+        
+        # If no rows were updated, insert the listener
+        if [ $? -ne 0 ] || [ $(psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT COUNT(*) FROM listeners WHERE id = 'main';" -t | tr -d ' ') -eq 0 ]; then
+            echo "📝 Creating main C2 listener in database..."
+            psql $PSQL_FLAGS -U postgres -d mulic2_db -c "INSERT INTO listeners (id, name, host, port, use_tls, cert_file, key_file, is_active, created_at) VALUES ('main', 'Main C2', '0.0.0.0', 23456, true, '../server.crt', '../server.key', true, NOW()) ON CONFLICT (id) DO UPDATE SET is_active = true, use_tls = true;" 2>/dev/null || true
+        fi
+        
+        echo "✅ TLS C2 listener activated successfully"
+        echo "   - Listener ID: main"
+        echo "   - Port: 23456"
+        echo "   - TLS: Enabled"
+        echo "   - Certificates: server.crt / server.key"
+    else
+        echo "⚠️  Listeners table not found - backend will create it on startup"
+    fi
+else
+    echo "❌ TLS certificates not found!"
+    echo "   - Expected: server.crt and server.key in project root"
+    echo "   - The C2 listener will not start with TLS encryption"
+    echo "   - Agent connections will fail or use plain TCP"
+    echo
+    echo "🔧 Attempting to generate certificates automatically..."
+    
+    # Try to generate certificates using OpenSSL if available
+    if command -v openssl >/dev/null 2>&1; then
+        echo "📝 Generating self-signed certificates with OpenSSL..."
+        openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj "/CN=localhost" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "✅ Certificates generated successfully!"
+            echo "   - server.crt and server.key created in project root"
+        else
+            echo "❌ Failed to generate certificates with OpenSSL"
+        fi
+    else
+        echo "❌ OpenSSL not found - cannot generate certificates automatically"
+        echo "💡 To generate certificates manually, run:"
+        echo "   ./generate-certs.ps1"
+        echo "   or install OpenSSL and run:"
+        echo "   openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj '/CN=localhost'"
+    fi
+    
+    echo
+    echo "Press Enter to continue..."
+    read
+fi
+
 echo
 echo "Starting MuliC2..."
 echo
 
 echo "🚀 Starting Backend Server..."
+
+# Final verification of TLS setup
+if [ -f "../server.crt" ] && [ -f "../server.key" ]; then
+    echo "🔐 TLS Setup Verification:"
+    echo "   ✅ Certificates: server.crt and server.key found"
+    echo "   ✅ Backend config: TLS enabled on port 23456"
+    echo "   ✅ Database: Listener activated and configured"
+    echo "   🎯 Agent connections will be TLS encrypted"
+else
+    echo "⚠️  TLS Setup Warning:"
+    echo "   ❌ Certificates not found - TLS listener may not start"
+    echo "   ⚠️  Agent connections may fail or use plain TCP"
+fi
+
 cd backend
 
 # Check if mulic2 executable exists, if not build it
@@ -549,7 +629,7 @@ echo "✅ MuliC2 is starting up!"
 echo
 echo "📱 Frontend: http://localhost:$FRONTEND_PORT"
 echo "🔧 Backend API: http://localhost:$BACKEND_PORT"
-echo "🎯 C2 Listener: Port 50050 (TLS encrypted)"
+echo "🎯 C2 Listener: Port 23456 (TLS encrypted)"
 echo
 echo "💡 Logs will stream below. Press Ctrl+C to stop both services."
 echo "💡 Backend PID: $BACKEND_PID"

@@ -295,7 +295,7 @@ try {
                     }
                 }
             }
-        } catch {
+    } catch {
             Write-Host "[!] Input read error: $($_.Exception.Message)" -ForegroundColor Yellow
         }
         
