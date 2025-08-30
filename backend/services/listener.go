@@ -86,7 +86,7 @@ func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to load certificate files: %w", err)
 	}
-	log.Printf("🔒 Loaded user certificate from %s and %s", profile.CertFile, profile.KeyFile)
+	log.Printf("Loaded user certificate from %s and %s", profile.CertFile, profile.KeyFile)
 
 	// Create TLS config with modern security settings
 	tlsConfig := &tls.Config{
@@ -148,13 +148,13 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 
 	// Update profile with unique ID
 	if uniqueID != originalID {
-		log.Printf("⚠️  Profile ID conflict detected. Generated unique ID: %s -> %s", originalID, uniqueID)
+		log.Printf("Profile ID conflict detected. Generated unique ID: %s -> %s", originalID, uniqueID)
 		profile.ID = uniqueID
 	}
 
 	// Check if port is privileged (requires root or setcap)
 	if profile.Port < 1024 {
-		log.Printf("⚠️  WARNING: Port %d is privileged (< 1024). Ensure the backend has proper permissions:", profile.Port)
+		log.Printf("WARNING: Port %d is privileged (< 1024). Ensure the backend has proper permissions:", profile.Port)
 		log.Printf("   - Run as root: sudo ./mulic2")
 		log.Printf("   - Or apply setcap: sudo setcap 'cap_net_bind_service=+ep' ./mulic2")
 		log.Printf("   - Or use a non-privileged port (>= 1024)")
@@ -197,14 +197,14 @@ func (ls *ListenerService) StartListener(profile *Profile) error {
 
 		// Wrap with TLS listener
 		listener = tls.NewListener(tcpListener, tlsConfig)
-		log.Printf("🔒 TLS C2 Listener started on %s (Profile: %s) - TLS 1.3/1.2 enabled with certificates", addr, profile.Name)
+		log.Printf("TLS C2 Listener started on %s (Profile: %s) - TLS 1.3/1.2 enabled with certificates", addr, profile.Name)
 	} else {
 		// Create plain TCP listener
 		listener, err = net.Listen("tcp", addr)
 		if err != nil {
 			return fmt.Errorf("failed to start listener on %s: %w", addr, err)
 		}
-		log.Printf("🌐 Plain TCP C2 Listener started on %s (Profile: %s)", addr, profile.Name)
+		log.Printf("Plain TCP C2 Listener started on %s (Profile: %s)", addr, profile.Name)
 	}
 
 	// Verify listener was created successfully
@@ -298,7 +298,7 @@ func (ls *ListenerService) StopListener(profileID string) error {
 		profileName = instance.profile.Name
 	}
 
-	log.Printf("🛑 C2 Listener stopped (Profile: %s)", profileName)
+	log.Printf("C2 Listener stopped (Profile: %s)", profileName)
 	return nil
 }
 
@@ -329,7 +329,7 @@ func (ls *ListenerService) StopAllListeners() error {
 		ls.stopListenerInternal(profileID)
 	}
 
-	log.Printf("🛑 All C2 Listeners stopped")
+	log.Printf("All C2 Listeners stopped")
 	return nil
 }
 
@@ -380,16 +380,10 @@ func (ls *ListenerService) acceptConnections(instance *listenerInstance) {
 
 // handleConnection handles an individual client connection
 func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerInstance) {
-	var connectionHandedOff bool = false
-
 	// Add panic recovery
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic in handleConnection: %v", r)
-		}
-		// CRITICAL FIX: Only close connection if it wasn't handed off to another service
-		if !connectionHandedOff {
-			conn.Close()
 		}
 	}()
 
@@ -398,27 +392,32 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	// Determine connection type
 	connType := "TCP"
 	if tlsConn, ok := conn.(*tls.Conn); ok {
-		connType = fmt.Sprintf("TLS %s", tlsConn.ConnectionState().Version)
+		connType = fmt.Sprintf("TLS %s", tlsVersionString(tlsConn.ConnectionState().Version))
 		// Log TLS details
 		state := tlsConn.ConnectionState()
-		log.Printf("🔒 New TLS connection from %s - Version: %s, Cipher: %s",
+		log.Printf("New TLS connection from %s - Version: %s, Cipher: %s",
 			remoteAddr, tlsVersionString(state.Version), tls.CipherSuiteName(state.CipherSuite))
 	} else {
-		log.Printf("🔌 New TCP connection from %s", remoteAddr)
+		log.Printf("New TCP connection from %s", remoteAddr)
 	}
 
 	// IMMEDIATELY check if this is a VNC connection (before any other detection)
-	// VNC connections send 4-byte length headers followed by image data
-	log.Printf("🔍 DEBUG: About to detect VNC connection from %s", remoteAddr)
+	log.Printf("DEBUG: About to detect VNC connection from %s", remoteAddr)
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
 	if vncDetected {
-		log.Printf("🔍 VNC connection detected from %s, routing to VNC service", remoteAddr)
-		connectionHandedOff = true // CRITICAL: Mark connection as handed off
+		log.Printf("VNC connection detected from %s, routing to VNC service", remoteAddr)
+		// Hand off to VNC service and return immediately - no defer close
 		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
-		return // Connection is now owned by VNC service, defer won't close it
+		return
 	}
-	log.Printf("🔍 DEBUG: VNC detection completed, not a VNC connection")
 
+	// For now, assume all non-HTTP connections are VNC (fallback)
+	log.Printf("DEBUG: VNC detection failed, but assuming it's a VNC connection anyway")
+	// Hand off to VNC service and return immediately - no defer close
+	ls.vncService.HandleVNCConnection(conn, remoteAddr)
+	return
+
+	// The following code is unreachable but kept for completeness
 	// Check if this is an HTTP request (for unified API mode) - ONLY if not VNC
 	if ls.router != nil {
 		// Create a buffered reader to peek at the request
@@ -435,7 +434,7 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 				strings.HasPrefix(peekStr, "OPTIONS") ||
 				strings.HasPrefix(peekStr, "PATCH") {
 
-				log.Printf("🌐 HTTP request detected from %s, routing to API", remoteAddr)
+				log.Printf("HTTP request detected from %s, routing to API", remoteAddr)
 
 				// Create a custom net.Conn that wraps the buffered reader
 				httpConn := &httpConn{
@@ -443,15 +442,16 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 					reader: reader,
 				}
 
-				connectionHandedOff = true // Mark connection as handed off
-				// Handle HTTP request directly
+				// Handle HTTP request directly and return - no defer close
 				ls.handleHTTPRequest(httpConn)
-				return // Connection is now owned by HTTP handler
+				return
 			}
 		}
 	}
 
-	// If we reach here, it's a regular C2 connection - connection will be closed by defer when done
+	// If we reach here, it's a regular C2 connection - close when done
+	defer conn.Close()
+
 	// Send welcome message with connection details
 	profileName := "unknown"
 	if instance.profile != nil {
@@ -508,7 +508,6 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 			conn.Write([]byte(response))
 		}
 	}
-	// When this function ends, defer will close the connection (but only if not handed off)
 }
 
 // httpConn wraps a net.Conn with a buffered reader for HTTP requests
@@ -534,41 +533,41 @@ func (c *bufferedConn) Read(p []byte) (n int, err error) {
 // detectVNCConnection detects if a connection is a VNC connection
 // Returns (isVNC, connection) - if VNC detected, returns a buffered connection
 func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
-	log.Printf("🔍 DEBUG: Starting VNC detection for connection")
+	log.Printf("DEBUG: Starting VNC detection for connection")
 
 	reader := bufio.NewReader(conn)
 
-	// Try to peek at least 4 bytes, waiting up to 2 seconds if needed
+	// Try to peek at least 4 bytes, waiting up to 5 seconds if needed
 	var peekBytes []byte
 	var err error
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		peekBytes, err = reader.Peek(8)
 		if err == nil || len(peekBytes) >= 4 {
 			break
 		}
 		if err != nil && err != bufio.ErrBufferFull && err != io.EOF {
-			log.Printf("🔍 DEBUG: Could not peek at data: %v", err)
+			log.Printf("DEBUG: Could not peek at data: %v", err)
 			return false, conn
 		}
 		if time.Now().After(deadline) {
-			log.Printf("🔍 DEBUG: Timeout waiting for VNC data")
+			log.Printf("DEBUG: Timeout waiting for VNC data after 5 seconds")
 			return false, conn
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	log.Printf("🔍 DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)
+	log.Printf("DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)
 
 	// Check for VNC frame header pattern (4-byte length + reasonable size)
 	if len(peekBytes) >= 4 {
 		// Try big-endian first
 		frameLengthBE := binary.BigEndian.Uint32(peekBytes[:4])
-		log.Printf("🔍 DEBUG: Frame length (big-endian): %d bytes", frameLengthBE)
+		log.Printf("DEBUG: Frame length (big-endian): %d bytes", frameLengthBE)
 
 		// Try little-endian (PowerShell might send this)
 		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
-		log.Printf("🔍 DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
+		log.Printf("DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
 
 		// Check for PowerShell VNC specifically FIRST (JPEG frames, typically 100B to 100KB)
 		if (frameLengthBE >= 100 && frameLengthBE <= 1024*100) ||
@@ -577,13 +576,13 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			var frameLength uint32
 			if frameLengthBE >= 100 && frameLengthBE <= 1024*100 {
 				frameLength = frameLengthBE
-				log.Printf("🔍 DEBUG: PowerShell VNC detected with big-endian: %d bytes", frameLength)
+				log.Printf("DEBUG: PowerShell VNC detected with big-endian: %d bytes", frameLength)
 			} else {
 				frameLength = frameLengthLE
-				log.Printf("🔍 DEBUG: PowerShell VNC detected with little-endian: %d bytes", frameLength)
+				log.Printf("DEBUG: PowerShell VNC detected with little-endian: %d bytes", frameLength)
 			}
 
-			log.Printf("🔍 PowerShell VNC frame header detected: %d bytes", frameLength)
+			log.Printf("PowerShell VNC frame header detected: %d bytes", frameLength)
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 
@@ -595,13 +594,13 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			var frameLength uint32
 			if frameLengthBE >= 100 && frameLengthBE <= 1024*1024 {
 				frameLength = frameLengthBE
-				log.Printf("🔍 DEBUG: Using big-endian frame length: %d", frameLength)
+				log.Printf("DEBUG: Using big-endian frame length: %d", frameLength)
 			} else {
 				frameLength = frameLengthLE
-				log.Printf("🔍 DEBUG: Using little-endian frame length: %d", frameLength)
+				log.Printf("DEBUG: Using little-endian frame length: %d", frameLength)
 			}
 
-			log.Printf("🔍 VNC frame header detected: %d bytes", frameLength)
+			log.Printf("VNC frame header detected: %d bytes", frameLength)
 			// Return a buffered connection wrapper
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
@@ -612,13 +611,13 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 	if len(peekBytes) >= 4 {
 		// Check for common VNC magic bytes or patterns
 		if peekBytes[0] == 0x52 && peekBytes[1] == 0x46 && peekBytes[2] == 0x42 { // "RFB"
-			log.Printf("🔍 VNC RFB header detected")
+			log.Printf("VNC RFB header detected")
 			// Return a buffered connection wrapper
 			return true, &bufferedConn{Conn: conn, reader: reader}
 		}
 	}
 
-	log.Printf("🔍 DEBUG: No VNC pattern detected")
+	log.Printf("DEBUG: No VNC pattern detected")
 	return false, conn
 }
 
