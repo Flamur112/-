@@ -426,8 +426,12 @@ func main() {
 	profileHandler.RegisterRoutes(api)
 
 	// Profile creation endpoint (for frontend auto-creation)
+	log.Printf("🔧 Registering /api/profile/create endpoint...")
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received profile creation request: %s %s", r.Method, r.URL.Path)
+
 		if r.Method != "POST" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -470,6 +474,7 @@ func main() {
 		// Return the created profile
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(serviceProfile)
+		log.Printf("✅ Profile created successfully: %s", serviceProfile.ID)
 	}).Methods("POST")
 
 	// Agent routes (REST)
@@ -599,11 +604,15 @@ func main() {
 	}
 
 	log.Printf("Starting HTTP server on port %d", config.Server.APIPort)
+	log.Printf("Router configured with API subrouter")
 
 	// Start server in goroutine
 	go func() {
+		log.Printf("🔄 HTTP server goroutine starting...")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
+			log.Printf("❌ HTTP server error: %v", err)
+		} else {
+			log.Printf("✅ HTTP server stopped normally")
 		}
 	}()
 
@@ -611,12 +620,23 @@ func main() {
 	log.Printf("⏳ Waiting for HTTP server to start up...")
 	time.Sleep(2 * time.Second)
 
-	// Test if server is responding
-	if resp, err := http.Get("http://localhost:8080/api/health"); err == nil {
-		resp.Body.Close()
-		log.Printf("✅ HTTP server is ready and responding")
-	} else {
-		log.Printf("⚠️  HTTP server may not be fully ready: %v", err)
+	// Test if server is responding with multiple attempts
+	maxAttempts := 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		log.Printf("🔄 Testing server response (attempt %d/%d)...", attempt, maxAttempts)
+
+		if resp, err := http.Get("http://localhost:8080/api/health"); err == nil {
+			resp.Body.Close()
+			log.Printf("✅ HTTP server is ready and responding (attempt %d)", attempt)
+			break
+		} else {
+			log.Printf("⚠️  Attempt %d failed: %v", attempt, err)
+			if attempt < maxAttempts {
+				time.Sleep(1 * time.Second)
+			} else {
+				log.Printf("❌ HTTP server failed to respond after %d attempts", maxAttempts)
+			}
+		}
 	}
 
 	// Wait for interrupt signal
