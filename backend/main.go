@@ -287,16 +287,17 @@ func main() {
 	// Create main router
 	router := mux.NewRouter()
 
-	// Apply CORS middleware to the main router - THIS IS KEY!
+	// BULLETPROOF CORS FIX - Apply to EVERYTHING
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers for ALL requests
+			// ALWAYS set CORS headers first, before anything else
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "86400")
 
-			// Handle preflight OPTIONS request
+			// Handle preflight OPTIONS request immediately
 			if r.Method == "OPTIONS" {
 				w.WriteHeader(http.StatusOK)
 				return
@@ -340,6 +341,14 @@ func main() {
 		})
 	}).Methods("GET", "POST", "OPTIONS")
 
+	// Simple CORS test endpoint
+	router.HandleFunc("/cors-test", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Simple CORS test request received from %s", r.RemoteAddr)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("CORS is working! This is a simple text response."))
+	}).Methods("GET", "POST", "OPTIONS")
+
 	// Debug endpoint to test routing
 	router.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Debug request received from %s", r.RemoteAddr)
@@ -359,25 +368,6 @@ func main() {
 
 	// Create API subrouter
 	api := router.PathPrefix("/api").Subrouter()
-
-	// Apply CORS middleware to API subrouter as well
-	api.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Set CORS headers for ALL API requests
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-			// Handle preflight OPTIONS request
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	})
 
 	// Health check endpoint - FIRST for testing
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
