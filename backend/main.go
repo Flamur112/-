@@ -236,6 +236,18 @@ func main() {
 			listener.CreatedAt = time.Now()
 			listener.UpdatedAt = time.Now()
 
+			// Set default values for TLS fields if not provided
+			if listener.CertFile == "" {
+				listener.CertFile = "../server.crt"
+			}
+			if listener.KeyFile == "" {
+				listener.KeyFile = "../server.key"
+			}
+			// Default to TLS enabled for security
+			if !listener.UseTLS {
+				listener.UseTLS = true
+			}
+
 			if err := listenerStorage.SaveListener(&listener); err != nil {
 				http.Error(w, fmt.Sprintf("Failed to save listener: %v", err), http.StatusInternalServerError)
 				return
