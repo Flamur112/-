@@ -68,10 +68,22 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 		tcpConn.SetReadBuffer(1024 * 64)  // 64KB read buffer
 		tcpConn.SetWriteBuffer(1024 * 64) // 64KB write buffer
 		log.Printf("🔍 Applied TCP-specific settings to connection")
-	} else if _, ok := conn.(*tls.Conn); ok {
+	} else if tlsConn, ok := conn.(*tls.Conn); ok {
 		log.Printf("🔍 TLS connection detected, using TLS-specific handling")
-		// For TLS connections, we rely on the TLS layer for security
-		// The underlying TCP connection settings are handled by the TLS listener
+		// For TLS connections, ensure handshake is complete
+		if !tlsConn.ConnectionState().HandshakeComplete {
+			log.Printf("🔍 Waiting for TLS handshake to complete...")
+			if err := tlsConn.Handshake(); err != nil {
+				log.Printf("🔍 TLS handshake failed: %v", err)
+				conn.Close()
+				return
+			}
+			log.Printf("🔍 TLS handshake completed successfully")
+		}
+		// Log TLS connection details
+		state := tlsConn.ConnectionState()
+		log.Printf("🔍 TLS VNC connection - Version: %s, Cipher: %s",
+			tlsVersionString(state.Version), tls.CipherSuiteName(state.CipherSuite))
 	}
 
 	vncConn := &VNCConnection{
