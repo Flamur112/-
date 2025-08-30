@@ -47,7 +47,20 @@
     <div class="main-container">
       <!-- Content Area -->
       <div class="content">
-        <router-view />
+        <div style="background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 4px; border: 2px solid #ffc107;">
+          <h3>🔍 Router View Debug</h3>
+          <p><strong>Current Route:</strong> {{ route.path }}</p>
+          <p><strong>Route Name:</strong> {{ route.name }}</p>
+          <p><strong>Route Meta:</strong> {{ JSON.stringify(route.meta) }}</p>
+        </div>
+        <router-view v-slot="{ Component }">
+          <component :is="Component" />
+          <div v-if="!Component" style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #dc3545;">
+            <h3>❌ No Component Rendered</h3>
+            <p>The router-view is not rendering any component.</p>
+            <p>This indicates a routing or component loading issue.</p>
+          </div>
+        </router-view>
       </div>
     </div>
   </div>

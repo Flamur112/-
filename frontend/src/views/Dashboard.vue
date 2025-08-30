@@ -1,5 +1,10 @@
 <template>
   <div class="dashboard">
+    <!-- Dashboard loaded indicator -->
+    <div style="background: #e8f5e8; padding: 10px; margin: 10px 0; border-radius: 4px; border: 2px solid #67c23a;">
+      <h3>✅ Dashboard Component Loaded Successfully</h3>
+      <p>Timestamp: {{ new Date().toLocaleString() }}</p>
+    </div>
     <!-- Overview Panel -->
     <div class="overview-panel">
       <h2 class="panel-title">Overview</h2>
@@ -165,19 +170,35 @@
         <div class="listeners-panel">
           <div class="panel-header">
             <h3>Listener Profiles</h3>
-            <el-button type="primary" @click="showCreateListenerDialog">
-              <el-icon><Plus /></el-icon>
-              Create New Listener
-            </el-button>
+            <div style="display: flex; gap: 10px;">
+              <el-button type="primary" @click="showCreateListenerDialog">
+                <el-icon><Plus /></el-icon>
+                Create New Listener
+              </el-button>
+              <el-button type="info" @click="loadProfiles">
+                <el-icon><Refresh /></el-icon>
+                Refresh Profiles
+              </el-button>
+            </div>
           </div>
           
           <div v-if="listeners.length === 0" class="empty-state">
             <el-icon size="64" color="#909399"><Setting /></el-icon>
             <h3>No Listener Profiles</h3>
             <p>Create a listener profile to start accepting connections.</p>
+            <p><strong>Debug: Listeners length = {{ listeners.length }}</strong></p>
+            <p><strong>Debug: Listeners data = {{ JSON.stringify(listeners) }}</strong></p>
           </div>
           
-          <el-table v-else :data="listeners" style="width: 100%" class="listeners-table">
+          <!-- Debug section -->
+          <div style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px;">
+            <h4>Debug Info:</h4>
+            <p><strong>Listeners length:</strong> {{ listeners.length }}</p>
+            <p><strong>ListenersDebug computed:</strong> {{ JSON.stringify(listenersDebug, null, 2) }}</p>
+            <p><strong>Listeners data:</strong> {{ JSON.stringify(listeners, null, 2) }}</p>
+          </div>
+          
+          <el-table v-if="listeners.length > 0" :data="listeners" style="width: 100%" class="listeners-table">
             <el-table-column prop="name" label="Profile Name" width="150" />
             <el-table-column prop="protocol" label="Protocol" width="100" />
             <el-table-column prop="host" label="Host" width="150" />
@@ -1304,9 +1325,15 @@ const getTaskStatusColor = (status: string) => {
 
 // Initialize dashboard
 onMounted(() => {
-  console.log('[DEBUG] Dashboard.vue mounted')
+  console.log('🚀 [DEBUG] Dashboard.vue mounted - Starting initialization...')
+  console.log('📊 Initial listeners value:', listeners.value)
+  console.log('📊 Initial listeners length:', listeners.value.length)
+  
   updateStats()
+  console.log('📈 Stats updated')
+  
   loadProfiles() // Load profiles from our unprotected endpoint
+  console.log('📡 loadProfiles() called')
   
   // Listen for profile creation events
   const handleProfileCreated = (event: any) => {
@@ -1336,7 +1363,19 @@ watch(selectedListenerId, (newId: string) => {
 watch(listeners, (newListeners) => {
   console.log('👀 Listeners array changed:', newListeners)
   console.log('👀 Listeners length:', newListeners.length)
+  console.log('👀 Listeners array type:', typeof newListeners)
+  console.log('👀 Is array:', Array.isArray(newListeners))
 }, { deep: true })
+
+// Add a computed property to test reactivity
+const listenersDebug = computed(() => {
+  console.log('🔄 Computed listenersDebug called, length:', listeners.value.length)
+  return {
+    length: listeners.value.length,
+    data: listeners.value,
+    isEmpty: listeners.value.length === 0
+  }
+})
 
 // Update dashboard statistics
 const updateStats = () => {
