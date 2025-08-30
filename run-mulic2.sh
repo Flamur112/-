@@ -429,9 +429,13 @@ elif [ -f "certs/server.crt" ] && [ -f "certs/server.key" ]; then
     
     # Check if listeners table exists and activate the main listener
     if psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT 1 FROM information_schema.tables WHERE table_name='listeners';" | grep -q "1" 2>/dev/null; then
-        # Update ALL listeners to use TLS and be active
-        echo "🔧 Updating all listeners to use TLS..."
-        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = true, use_tls = true WHERE port = 23456;" 2>/dev/null || true
+        # Force ALL listeners to use TLS and be active (regardless of name/ID)
+        echo "🔧 Force-updating ALL listeners to use TLS..."
+        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = true, use_tls = true;" 2>/dev/null || true
+        
+        # Also force-deactivate any plain TCP listeners
+        echo "🔧 Deactivating any remaining plain TCP listeners..."
+        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = false WHERE use_tls = false;" 2>/dev/null || true
         
         # If no rows were updated, insert the main listener
         if [ $? -ne 0 ] || [ $(psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT COUNT(*) FROM listeners WHERE port = 23456;" -t | tr -d ' ') -eq 0 ]; then
