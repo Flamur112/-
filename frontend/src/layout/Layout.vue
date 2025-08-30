@@ -53,6 +53,12 @@
           <p><strong>Route Name:</strong> {{ route.name }}</p>
           <p><strong>Route Meta:</strong> {{ JSON.stringify(route.meta) }}</p>
         </div>
+        <!-- Test: Direct component import -->
+        <div style="background: #d1ecf1; padding: 15px; margin: 15px 0; border-radius: 8px; border: 2px solid #17a2b8;">
+          <h3>🧪 Direct Component Import Test</h3>
+          <Dashboard />
+        </div>
+        
         <router-view v-slot="{ Component }">
           <component :is="Component" />
           <div v-if="!Component" style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #dc3545;">
@@ -72,6 +78,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authService } from '@/services/auth'
 import { listenerService } from '@/services/listener'
+import Dashboard from '@/views/Dashboard.vue'
 
 const route = useRoute()
 const router = useRouter()
