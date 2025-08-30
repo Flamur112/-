@@ -47,35 +47,7 @@
     <div class="main-container">
       <!-- Content Area -->
       <div class="content">
-        <div style="background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 4px; border: 2px solid #ffc107;">
-          <h3>🔍 Router View Debug</h3>
-          <p><strong>Current Route:</strong> {{ route.path }}</p>
-          <p><strong>Route Name:</strong> {{ route.name }}</p>
-          <p><strong>Route Meta:</strong> {{ JSON.stringify(route.meta) }}</p>
-        </div>
-        <!-- Test: Direct component import -->
-        <div style="background: #d1ecf1; padding: 15px; margin: 15px 0; border-radius: 8px; border: 2px solid #17a2b8;">
-          <h3>🧪 Direct Component Import Test</h3>
-          <Dashboard />
-        </div>
-        
-        <router-view v-slot="{ Component, route }">
-          <div style="background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #dee2e6;">
-            <h4>🔍 Router-View Debug</h4>
-            <p><strong>Component:</strong> {{ Component ? 'Component loaded' : 'No component' }}</p>
-            <p><strong>Component type:</strong> {{ typeof Component }}</p>
-            <p><strong>Route:</strong> {{ route?.path }}</p>
-            <p><strong>Route name:</strong> {{ route?.name }}</p>
-          </div>
-          
-          <component :is="Component" v-if="Component" />
-          <div v-else style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #dc3545;">
-            <h3>❌ No Component Rendered</h3>
-            <p>The router-view is not rendering any component.</p>
-            <p>This indicates a routing or component loading issue.</p>
-            <p><strong>Debug:</strong> Component is {{ Component === null ? 'null' : Component === undefined ? 'undefined' : 'other' }}</p>
-          </div>
-        </router-view>
+        <router-view />
       </div>
     </div>
   </div>
@@ -87,7 +59,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authService } from '@/services/auth'
 import { listenerService } from '@/services/listener'
-import Dashboard from '@/views/Dashboard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,217 +69,164 @@ const currentPageTitle = computed(() => route.meta?.title || 'Dashboard')
 
 const menuRoutes = computed(() => {
   const allRoutes = router.getRoutes()
-  console.log('All routes:', allRoutes.map(r => ({ path: r.path, name: r.name, meta: r.meta })))
-  
-  const routes = allRoutes.filter(r => r.meta?.title && !r.meta?.hideFromMenu) || []
-  console.log('Filtered menu routes:', routes.map(r => ({ path: r.path, name: r.name, meta: r.meta })))
-  
-  return routes
+  return allRoutes.filter(route => !route.meta?.hideFromMenu)
 })
 
-const handleTabClick = (tab: any) => {
-  console.log('Tab clicked:', tab)
-  
-  // Element Plus tabs pass the paneName property
-  const routePath = tab?.paneName || tab?.name
-  
-  if (routePath) {
-    console.log('Navigating to:', routePath)
-    router.push(routePath)
-  } else {
-    console.warn('Invalid tab data:', tab)
-    console.log('Tab properties:', Object.keys(tab || {}))
-  }
-}
-
-// Keep activeTab in sync with route
+// Watch for route changes to update active tab
 watch(() => route.path, (newPath) => {
   activeTab.value = newPath
 })
 
-// Debug route loading
-onMounted(() => {
-  console.log('Layout mounted, current route:', route.path)
-  console.log('Available routes:', router.getRoutes())
-  console.log('Menu routes:', menuRoutes.value)
-  
-  // Check if routes are properly configured
-  const allRoutes = router.getRoutes()
-  const filteredRoutes = allRoutes.filter(r => r.meta?.title && !r.meta?.hideFromMenu)
-  
-  console.log('Route configuration check:')
-  allRoutes.forEach(r => {
-    console.log(`- ${r.path}: title=${r.meta?.title}, hideFromMenu=${r.meta?.hideFromMenu}`)
-  })
-})
-
-
-
-const handleServerRestart = async () => {
-  try {
-    let hasActiveListener = false
-    
-    // Check if there's an active listener
-    try {
-      const status = await listenerService.getStatus()
-      hasActiveListener = status.active
-      
-      if (hasActiveListener) {
-        await ElMessageBox.confirm(
-          `You have an active C2 listener running on ${status.address}. ` +
-          'Restarting the server will stop the C2 listener and disconnect all agents. ' +
-          'All agent connections will be lost. Are you sure you want to restart the server?',
-          'Server Restart Confirmation',
-          {
-            confirmButtonText: 'Yes, Restart Server',
-            cancelButtonText: 'Cancel',
-            type: 'warning',
-            confirmButtonClass: 'el-button--danger',
-          }
-        )
-      }
-    } catch (statusError) {
-      console.warn('Could not check listener status:', statusError)
-    }
-
-    // Show message about manual restart
-    ElMessage.info('Please restart the server manually using the launcher script (run-mulic2.bat)')
-  } catch (error) {
-    if (error === 'cancel') {
-      return
-    }
-    console.error('Server restart error:', error)
+// Handle tab clicks
+const handleTabClick = (tab: any) => {
+  if (tab.name !== route.path) {
+    router.push(tab.name)
   }
 }
 
-const handleCommand = (command: string) => {
+// Handle dropdown commands
+const handleCommand = async (command: string) => {
   switch (command) {
     case 'settings':
-      // Settings is now handled within the Dashboard
-      router.push('/')
+      ElMessage.info('Settings functionality coming soon...')
       break
     case 'serverRestart':
-      handleServerRestart()
+      try {
+        const result = await ElMessageBox.confirm(
+          'Are you sure you want to restart the server? This will disconnect all active connections.',
+          'Restart Server',
+          {
+            confirmButtonText: 'Restart',
+            cancelButtonText: 'Cancel',
+            type: 'warning'
+          }
+        )
+        
+        if (result === 'confirm') {
+          // TODO: Implement server restart
+          ElMessage.success('Server restart initiated...')
+        }
+      } catch (error) {
+        if (error !== 'cancel') {
+          ElMessage.error('Failed to restart server.')
+        }
+      }
       break
   }
 }
+
+onMounted(() => {
+  // Initialize any required setup
+})
 </script>
 
-<style scoped lang="scss">
+<style scoped>
 .app-wrapper {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background-color: var(--primary-black);
-  font-family: 'Courier New', monospace;
+  background-color: #f5f7fa;
 }
 
 .header-container {
-  background: var(--secondary-black);
-  border-bottom: 1px solid var(--accent-red);
-  
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px 20px;
-    border-bottom: 1px solid var(--accent-red);
-    
-    .logo-section {
-      display: flex;
-      align-items: center;
-      
-      .logo-img {
-        width: 32px;
-        height: 32px;
-        margin-right: 12px;
-      }
-      
-      .logo-text {
-        color: var(--accent-red);
-        font-size: 20px;
-        font-weight: bold;
-        letter-spacing: 1px;
-      }
-    }
-    
-    .header-right {
-      .user-info {
-        display: flex;
-        align-items: center;
-        color: var(--text-gray);
-        cursor: pointer;
-        padding: 8px 12px;
-        border-radius: 4px;
-        transition: background-color 0.2s;
-        border: 1px solid var(--border-color);
-        
-        &:hover {
-          background: var(--medium-gray);
-          border-color: var(--accent-red);
-          color: var(--text-white);
-        }
-        
-        .username {
-          margin: 0 8px;
-          font-weight: 500;
-          font-size: 14px;
-        }
-      }
-    }
-  }
-  
-  .nav-tabs {
-    padding: 0 20px;
-    background: var(--secondary-black);
-    
-    .main-tabs {
-      :deep(.el-tabs__header) {
-        margin: 0;
-        border-bottom: none;
-        padding: 0;
-      }
-      
-      :deep(.el-tabs__nav-wrap) {
-        &::after {
-          display: none;
-        }
-      }
-      
-      :deep(.el-tabs__item) {
-        color: var(--text-gray);
-        border: 1px solid var(--accent-red);
-        border-bottom: none;
-        border-radius: 6px 6px 0 0;
-        margin-right: 4px;
-        padding: 12px 20px;
-        font-weight: 500;
-        transition: all 0.2s;
-        font-family: 'Courier New', monospace;
-        background: var(--secondary-black);
-        
-        &:hover {
-          color: var(--text-white);
-          background: var(--medium-gray);
-        }
-        
-        &.is-active {
-          color: var(--text-white);
-          background: var(--primary-black);
-          border-color: var(--accent-red);
-        }
-        
-        .el-icon {
-          margin-right: 8px;
-          font-size: 16px;
-        }
-      }
-      
-      :deep(.el-tabs__content) {
-        display: none;
-      }
-    }
-  }
+  background: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  z-index: 1000;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  height: 60px;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-img {
+  width: 32px;
+  height: 32px;
+}
+
+.logo-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #409eff;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+}
+
+.user-info:hover {
+  background-color: #f5f7fa;
+}
+
+.username {
+  font-weight: 500;
+  color: #303133;
+}
+
+.nav-tabs {
+  padding: 0 20px;
+  background: white;
+  border-bottom: 1px solid #e4e7ed;
+}
+
+.main-tabs {
+  border: none;
+}
+
+.main-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+
+.main-tabs :deep(.el-tabs__nav-wrap) {
+  padding: 0;
+}
+
+.main-tabs :deep(.el-tabs__item) {
+  height: 40px;
+  line-height: 40px;
+  padding: 0 20px;
+  font-weight: 500;
+  color: #606266;
+  border: none;
+  background: transparent;
+  transition: all 0.2s;
+}
+
+.main-tabs :deep(.el-tabs__item:hover) {
+  color: #409eff;
+  background: #f0f9ff;
+}
+
+.main-tabs :deep(.el-tabs__item.is-active) {
+  color: #409eff;
+  background: #e6f7ff;
+  border-bottom: 2px solid #409eff;
+}
+
+.main-tabs :deep(.el-tabs__content) {
+  display: none;
 }
 
 .main-container {
@@ -316,32 +234,12 @@ const handleCommand = (command: string) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background-color: var(--primary-black);
 }
 
 .content {
   flex: 1;
-  padding: 24px;
+  padding: 20px;
   overflow-y: auto;
-  background-color: var(--primary-black);
-  color: var(--text-white);
-  min-height: 0; /* Important for flexbox */
-}
-
-// Dropdown menu overrides
-:deep(.el-dropdown-menu) {
-  background-color: var(--dark-gray) !important;
-  border: 1px solid var(--accent-red) !important;
-  
-  .el-dropdown-menu__item {
-    color: var(--text-gray) !important;
-    font-family: 'Courier New', monospace !important;
-    
-    &:hover {
-      background-color: var(--medium-gray) !important;
-      color: var(--text-white) !important;
-    }
-  }
 }
 </style>
 

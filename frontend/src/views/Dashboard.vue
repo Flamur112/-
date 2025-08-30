@@ -2,12 +2,6 @@
   <div class="dashboard">
     <h1>🎯 Dashboard</h1>
     
-    <!-- Success message -->
-    <div style="background: #e8f5e8; padding: 15px; margin: 15px 0; border-radius: 8px; border: 2px solid #67c23a;">
-      <h3>✅ Dashboard Component Successfully Loaded!</h3>
-      <p>The router is now working correctly.</p>
-    </div>
-    
     <!-- Listeners Panel -->
     <div class="listeners-panel">
       <div class="panel-header">
@@ -43,17 +37,6 @@
           <span class="stat-number">{{ uniquePortsCount }}</span>
         </div>
       </div>
-      
-      <!-- Debug Info (Collapsible) -->
-      <el-collapse>
-        <el-collapse-item title="🔍 Debug Info" name="debug">
-          <div style="background: #f0f0f0; padding: 10px; border-radius: 4px;">
-            <p><strong>Listeners length:</strong> {{ listeners.length }}</p>
-            <p><strong>Listeners data:</strong></p>
-            <pre style="background: #fff; padding: 10px; border-radius: 4px; overflow-x: auto;">{{ JSON.stringify(listeners, null, 2) }}</pre>
-          </div>
-        </el-collapse-item>
-      </el-collapse>
       
       <!-- Empty State -->
       <div v-if="listeners.length === 0" class="empty-state">
@@ -117,23 +100,17 @@ const uniquePortsCount = computed(() =>
 
 // Load profiles function
 const loadProfiles = async () => {
-  console.log('🔄 Starting to load profiles...')
   try {
-    console.log('📡 Making request to /api/profile/list...')
     const response = await fetch('/api/profile/list')
     
-    console.log('📥 Response received:', response.status, response.statusText)
     if (!response.ok) {
-      console.error('❌ Profile API not available - server returned:', response.status, response.statusText)
       ElMessage.error(`Failed to load profiles: Server returned ${response.status} ${response.statusText}`)
       listeners.value = []
       return
     }
     
     const data = await response.json()
-    console.log('📊 Raw response data:', data)
     const profiles = data.profiles || []
-    console.log('📋 Profiles found:', profiles.length)
     
     // Convert profiles to listeners format
     const mappedListeners = profiles.map((profile: any) => ({
@@ -154,14 +131,10 @@ const loadProfiles = async () => {
       connections: 0
     }))
     
-    console.log('🔄 Setting listeners.value to:', mappedListeners)
     listeners.value = mappedListeners
     
     if (listeners.value.length === 0) {
-      console.log('⚠️ No listener profiles found in response')
       ElMessage.warning('No listener profiles found.')
-    } else {
-      console.log('✅ Loaded listeners:', listeners.value)
     }
   } catch (error) {
     console.error('Failed to load profiles:', error)
@@ -279,22 +252,15 @@ const formatDate = (dateString: string) => {
 
 // Listen for profile creation events
 const handleProfileCreated = () => {
-  console.log('🎉 Profile created event detected, reloading profiles...')
   loadProfiles()
 }
 
 onMounted(() => {
-  console.log('🚀 Dashboard component mounted - starting initialization...')
-  console.log('📊 Initial listeners value:', listeners.value)
-  console.log('📊 Initial listeners length:', listeners.value.length)
-  
   // Load profiles
   loadProfiles()
-  console.log('📡 loadProfiles() called')
   
   // Register event listener
   window.addEventListener('profileCreated', handleProfileCreated)
-  console.log('📡 Dashboard registered profileCreated event listener')
 })
 </script>
 
