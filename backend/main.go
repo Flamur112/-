@@ -334,6 +334,16 @@ func main() {
 		}
 	}))).Methods("DELETE")
 
+	// Agent template download endpoint (protected)
+	api.Handle("/agent/template", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=vnc_agent_template.ps1")
+
+		// Read and serve the updated agent template
+		templatePath := "../frontend/src/utils/vnc_agent_template.ps1"
+		http.ServeFile(w, r, templatePath)
+	}))).Methods("GET")
+
 	// Profile management endpoints (protected)
 	api.Handle("/profile/list", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get all profiles from config
