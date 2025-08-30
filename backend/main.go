@@ -452,8 +452,8 @@ func main() {
 		if r.Method != "POST" {
 			log.Printf("❌ Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
+			return
+		}
 
 		var profile struct {
 			Name        string `json:"name"`
@@ -468,8 +468,8 @@ func main() {
 
 		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
-				return
-			}
+			return
+		}
 
 		// Create service profile
 		serviceProfile := &services.Profile{
@@ -617,15 +617,15 @@ func main() {
 		if r.Method != "PUT" {
 			log.Printf("❌ Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-						return
-					}
+			return
+		}
 
 		vars := mux.Vars(r)
 		profileID := vars["id"]
 		if profileID == "" {
 			http.Error(w, "Profile ID is required", http.StatusBadRequest)
-					return
-				}
+			return
+		}
 
 		var profile struct {
 			Name        string `json:"name"`
@@ -641,16 +641,16 @@ func main() {
 
 		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
-					return
-				}
+			return
+		}
 
 		// Get existing profile
 		existingProfile, err := profileStorage.GetProfile(profileID)
 		if err != nil {
 			log.Printf("❌ Failed to get profile %s: %v", profileID, err)
 			http.Error(w, fmt.Sprintf("Profile not found: %v", err), http.StatusNotFound)
-						return
-					}
+			return
+		}
 
 		// Update profile fields
 		existingProfile.Name = profile.Name
@@ -694,9 +694,9 @@ func main() {
 	// Health check endpoint
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Health check request received")
-				w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"service":   "MuliC2 Backend",
@@ -706,7 +706,7 @@ func main() {
 	// Simple test endpoint
 	api.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Test endpoint request received")
-				w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"message": "Test endpoint working!",
@@ -767,7 +767,7 @@ func main() {
 
 	// VNC endpoints - NO AUTH REQUIRED
 	log.Printf("🔧 Registering VNC endpoints (no auth required)...")
-	
+
 	// VNC Start endpoint
 	api.HandleFunc("/vnc/start", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Received VNC start request: %s %s", r.Method, r.URL.Path)
@@ -830,7 +830,7 @@ func main() {
 		case "GET":
 			// List all listeners
 			listeners, err := listenerStorage.GetAllListeners()
-	if err != nil {
+			if err != nil {
 				http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
 				return
 			}
@@ -883,7 +883,7 @@ func main() {
 
 		// Get listener details and start it
 		listener, err := listenerStorage.GetListener(id)
-	if err != nil {
+		if err != nil {
 			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
 			return
 		}
