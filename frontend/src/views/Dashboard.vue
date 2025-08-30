@@ -639,24 +639,6 @@ const vncSettings = ref({
 // Agent management
 const agents = ref<any[]>([])
 
-interface Profile {
-  id: string
-  name: string
-  projectName?: string
-  host: string
-  port: number
-  description?: string
-  useTLS: boolean
-  certFile?: string
-  keyFile?: string
-  pollInterval: number
-  isActive: boolean
-  createdAt: string
-  updatedAt: string
-}
-
-const availableProfiles = ref<Profile[]>([])
-
 // API base URL - use relative URLs to work with Vite proxy
 const API_BASE_URL = ''
 
@@ -701,7 +683,7 @@ const loadProfiles = async () => {
     if (!response.ok) {
       console.error('Profile API not available - server returned:', response.status, response.statusText)
       ElMessage.error(`Failed to load profiles: Server returned ${response.status} ${response.statusText}`)
-      availableProfiles.value = []
+      listeners.value = []
       return
     }
     
@@ -709,15 +691,37 @@ const loadProfiles = async () => {
     if (!contentType || !contentType.includes('application/json')) {
       console.error('Profile API returned non-JSON response:', contentType)
       ElMessage.error('Failed to load profiles: Invalid response format from server')
-      availableProfiles.value = []
+      listeners.value = []
       return
     }
     
     const data = await response.json()
-    availableProfiles.value = data.profiles || []
+    const profiles = data.profiles || []
     
-    if (availableProfiles.value.length === 0) {
-      ElMessage.warning('No profiles found. Please create profiles in the backend configuration.')
+    // Convert profiles to listeners format for the dashboard
+    listeners.value = profiles.map((profile: any) => ({
+      id: profile.id,
+      name: profile.name,
+      projectName: profile.projectName,
+      host: profile.host,
+      port: profile.port,
+      description: profile.description,
+      useTLS: profile.useTLS,
+      certFile: profile.certFile,
+      keyFile: profile.keyFile,
+      isActive: profile.isActive,
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt
+    }))
+    
+    // Update stats
+    stats.value.activeListeners = listeners.value.filter(l => l.isActive).length
+    
+    if (listeners.value.length === 0) {
+      ElMessage.warning('No listener profiles found.')
+    } else {
+      console.log('✅ Loaded listeners:', listeners.value)
+      console.log('✅ Active listeners:', stats.value.activeListeners)
     }
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -725,13 +729,13 @@ const loadProfiles = async () => {
     }
     console.error('Failed to load profiles:', error)
     ElMessage.error('Failed to load profiles: Network error or server unavailable')
-    availableProfiles.value = []
+    listeners.value = []
   }
 }
 
-// Get profile by ID
-const getProfileById = (profileId: string): Profile | undefined => {
-  return availableProfiles.value.find(p => p.id === profileId)
+// Get listener by ID
+const getListenerById = (listenerId: string): Listener | undefined => {
+  return listeners.value.find(l => l.id === listenerId)
 }
 
 // Computed properties
@@ -1338,11 +1342,11 @@ const loadDashboardData = async () => {
   }
 }
 
-const activeTLSProfile = computed<Profile | undefined>(() => {
+const activeTLSProfile = computed<Listener | undefined>(() => {
   return (
-    availableProfiles.value.find(p => p.isActive && p.useTLS) ||
-    availableProfiles.value.find(p => p.useTLS) ||
-    availableProfiles.value[0]
+    listeners.value.find(l => l.isActive && l.useTLS) ||
+    listeners.value.find(l => l.useTLS) ||
+    listeners.value[0]
   )
 })
 
