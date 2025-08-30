@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -66,6 +67,11 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 		// Set socket buffer sizes
 		tcpConn.SetReadBuffer(1024 * 64)  // 64KB read buffer
 		tcpConn.SetWriteBuffer(1024 * 64) // 64KB write buffer
+		log.Printf("🔍 Applied TCP-specific settings to connection")
+	} else if _, ok := conn.(*tls.Conn); ok {
+		log.Printf("🔍 TLS connection detected, using TLS-specific handling")
+		// For TLS connections, we rely on the TLS layer for security
+		// The underlying TCP connection settings are handled by the TLS listener
 	}
 
 	vncConn := &VNCConnection{
@@ -88,12 +94,16 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 
 	log.Printf("🔍 New VNC connection established: %s from %s", connectionID, agentIP)
 	log.Printf("🔍 Total VNC connections: %d", len(vs.connections))
+	log.Printf("🔍 VNC connection will stay open for continuous streaming")
 
 	// DO NOT send acknowledgment - PowerShell script doesn't expect it
 	// vs.sendAcknowledgment(conn)
 
 	// Start processing frames from this connection
 	go vs.processVNCStream(vncConn)
+
+	// Log that we're ready to receive data
+	log.Printf("🔍 VNC service ready to receive data from %s", connectionID)
 }
 
 // processVNCStream processes the incoming VNC stream with robust error handling
@@ -129,14 +139,14 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		}
 
 		// Read more data from the connection with appropriate timeout
-		vncConn.conn.SetReadDeadline(time.Now().Add(60 * time.Second)) // Longer timeout for continuous stream
+		vncConn.conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // 5 minute timeout for continuous stream
 		n, err := vncConn.conn.Read(buffer)
 		if err != nil {
 			// Enhanced error logging with error type information
 			log.Printf("🔍 Error reading from %s: %T %v", vncConn.ID, err, err)
 
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				log.Printf("🔍 Read timeout for %s, connection may be idle", vncConn.ID)
+				log.Printf("🔍 Read timeout for %s, connection may be idle - continuing", vncConn.ID)
 				// For continuous streams, timeout might be normal - check connection health
 				continue
 			}
@@ -150,11 +160,13 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 		}
 
 		if n == 0 {
-			log.Printf("🔍 No data read from %s, connection may be closing", vncConn.ID)
+			log.Printf("🔍 No data read from %s, connection may be idle", vncConn.ID)
 			// Don't immediately break on zero bytes - could be temporary
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+
+		log.Printf("🔍 Received %d bytes from %s", n, vncConn.ID)
 
 		// Add new data to pending buffer
 		pendingData = append(pendingData, buffer[:n]...)
