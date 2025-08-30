@@ -425,6 +425,53 @@ func main() {
 	authHandler.RegisterRoutes(api)
 	profileHandler.RegisterRoutes(api)
 
+	// Profile creation endpoint (for frontend auto-creation)
+	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var profile struct {
+			Name        string `json:"name"`
+			ProjectName string `json:"projectName"`
+			Host        string `json:"host"`
+			Port        int    `json:"port"`
+			Description string `json:"description"`
+			UseTLS      bool   `json:"useTLS"`
+			CertFile    string `json:"certFile"`
+			KeyFile     string `json:"keyFile"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Create service profile
+		serviceProfile := &services.Profile{
+			ID:          fmt.Sprintf("profile_%d", time.Now().Unix()),
+			Name:        profile.Name,
+			ProjectName: profile.ProjectName,
+			Host:        profile.Host,
+			Port:        profile.Port,
+			Description: profile.Description,
+			UseTLS:      profile.UseTLS,
+			CertFile:    profile.CertFile,
+			KeyFile:     profile.KeyFile,
+		}
+
+		// Start the listener
+		if err := listenerService.StartListener(serviceProfile); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Return the created profile
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(serviceProfile)
+	}).Methods("POST")
+
 	// Agent routes (REST)
 	api.HandleFunc("/agent/register", agentHandler.Register).Methods("POST")
 	api.HandleFunc("/agent/heartbeat", agentHandler.Heartbeat).Methods("POST")
