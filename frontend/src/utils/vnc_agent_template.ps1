@@ -312,7 +312,13 @@ function Invoke-KeyboardEvent {
 }
 
 # Automatically load the server certificate from the root folder and use its thumbprint
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+if ($PSScriptRoot) {
+    $scriptDir = $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path) {
+    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    $scriptDir = Get-Location
+}
 $certPath = Join-Path $scriptDir 'server.crt'
 if (-Not (Test-Path $certPath)) {
     Write-Host "[!] server.crt not found in script directory: $scriptDir" -ForegroundColor Red
