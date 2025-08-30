@@ -2,88 +2,239 @@
   <div class="dashboard">
     <h1>🎯 Dashboard</h1>
     
-    <!-- Listeners Panel -->
-    <div class="listeners-panel">
-      <div class="panel-header">
-        <h3>Listener Profiles</h3>
-        <div style="display: flex; gap: 10px;">
-          <el-button type="warning" @click="cleanupDuplicateProfiles" :loading="cleaning">
-            <el-icon><Delete /></el-icon>
-            Cleanup Duplicates
-          </el-button>
-          <el-button type="info" @click="loadProfiles">
-            <el-icon><Refresh /></el-icon>
-            Refresh Profiles
-          </el-button>
-        </div>
-      </div>
+    <!-- Main Dashboard Tabs -->
+    <el-tabs v-model="activeTab" type="card" class="dashboard-tabs">
       
-      <!-- Stats -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <h4>Total Profiles</h4>
-          <span class="stat-number">{{ listeners.length }}</span>
-        </div>
-        <div class="stat-card">
-          <h4>Active Profiles</h4>
-          <span class="stat-number">{{ activeProfilesCount }}</span>
-        </div>
-        <div class="stat-card">
-          <h4>TLS Enabled</h4>
-          <span class="stat-number">{{ tlsProfilesCount }}</span>
-        </div>
-        <div class="stat-card">
-          <h4>Unique Ports</h4>
-          <span class="stat-number">{{ uniquePortsCount }}</span>
-        </div>
-      </div>
-      
-      <!-- Empty State -->
-      <div v-if="listeners.length === 0" class="empty-state">
-        <el-icon size="64" color="#909399"><Setting /></el-icon>
-        <h3>No Listener Profiles</h3>
-        <p>Create a listener profile to start accepting connections.</p>
-      </div>
-      
-      <!-- Listeners Table -->
-      <el-table v-else :data="listeners" style="width: 100%" class="listeners-table">
-        <el-table-column prop="name" label="Profile Name" width="150" />
-        <el-table-column prop="protocol" label="Protocol" width="100" />
-        <el-table-column prop="host" label="Host" width="120" />
-        <el-table-column prop="port" label="Port" width="80" />
-        <el-table-column prop="isActive" label="Status" width="100">
-          <template #default="scope">
-            <el-tag :type="scope.row.isActive ? 'success' : 'info'">
-              {{ scope.row.isActive ? 'Active' : 'Inactive' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="connections" label="Connections" width="100" />
-        <el-table-column prop="createdAt" label="Created" width="150">
-          <template #default="scope">
-            {{ formatDate(scope.row.createdAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" width="120">
-          <template #default="scope">
-            <el-button size="small" type="danger" @click="deleteProfile(scope.row.id)">
-              <el-icon><Delete /></el-icon>
+      <!-- Agents Tab -->
+      <el-tab-pane label="Agents" name="agents">
+        <div class="tab-content">
+          <div class="section-header">
+            <h3>🤖 Connected Agents</h3>
+            <el-button type="primary" @click="refreshAgents">
+              <el-icon><Refresh /></el-icon>
+              Refresh
             </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+          </div>
+          
+          <div v-if="agents.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Monitor /></el-icon>
+            <h3>No Agents Connected</h3>
+            <p>Deploy agents to see them here.</p>
+          </div>
+          
+          <el-table v-else :data="agents" style="width: 100%">
+            <el-table-column prop="id" label="Agent ID" width="120" />
+            <el-table-column prop="hostname" label="Hostname" width="150" />
+            <el-table-column prop="ip" label="IP Address" width="120" />
+            <el-table-column prop="os" label="OS" width="100" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.status === 'online' ? 'success' : 'danger'">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lastSeen" label="Last Seen" width="150" />
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="viewAgent(scope.row)">
+                  <el-icon><View /></el-icon>
+                  View
+                </el-button>
+                <el-button size="small" type="danger" @click="disconnectAgent(scope.row.id)">
+                  <el-icon><Close /></el-icon>
+                  Disconnect
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+      
+      <!-- Listeners Tab -->
+      <el-tab-pane label="Listeners" name="listeners">
+        <div class="tab-content">
+          <div class="section-header">
+            <h3>📡 Listener Profiles</h3>
+            <div style="display: flex; gap: 10px;">
+              <el-button type="warning" @click="cleanupDuplicateProfiles" :loading="cleaning">
+                <el-icon><Delete /></el-icon>
+                Cleanup Duplicates
+              </el-button>
+              <el-button type="primary" @click="createListener">
+                <el-icon><Plus /></el-icon>
+                Create Listener
+              </el-button>
+              <el-button type="info" @click="loadProfiles">
+                <el-icon><Refresh /></el-icon>
+                Refresh
+              </el-button>
+            </div>
+          </div>
+          
+          <!-- Stats -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <h4>Total Profiles</h4>
+              <span class="stat-number">{{ listeners.length }}</span>
+            </div>
+            <div class="stat-card">
+              <h4>Active Profiles</h4>
+              <span class="stat-number">{{ activeProfilesCount }}</span>
+            </div>
+            <div class="stat-card">
+              <h4>TLS Enabled</h4>
+              <span class="stat-number">{{ tlsProfilesCount }}</span>
+            </div>
+            <div class="stat-card">
+              <h4>Unique Ports</h4>
+              <span class="stat-number">{{ uniquePortsCount }}</span>
+            </div>
+          </div>
+          
+          <div v-if="listeners.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Setting /></el-icon>
+            <h3>No Listener Profiles</h3>
+            <p>Create a listener profile to start accepting connections.</p>
+          </div>
+          
+          <el-table v-else :data="listeners" style="width: 100%" class="listeners-table">
+            <el-table-column prop="name" label="Profile Name" width="150" />
+            <el-table-column prop="protocol" label="Protocol" width="100" />
+            <el-table-column prop="host" label="Host" width="120" />
+            <el-table-column prop="port" label="Port" width="80" />
+            <el-table-column prop="isActive" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="scope.row.isActive ? 'success' : 'info'">
+                  {{ scope.row.isActive ? 'Active' : 'Inactive' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="connections" label="Connections" width="100" />
+            <el-table-column prop="createdAt" label="Created" width="150">
+              <template #default="scope">
+                {{ formatDate(scope.row.createdAt) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="200">
+              <template #default="scope">
+                <el-button size="small" @click="editListener(scope.row)">
+                  <el-icon><Edit /></el-icon>
+                  Edit
+                </el-button>
+                <el-button size="small" type="danger" @click="deleteProfile(scope.row.id)">
+                  <el-icon><Delete /></el-icon>
+                  Delete
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+      
+      <!-- VNC Tab -->
+      <el-tab-pane label="VNC" name="vnc">
+        <div class="tab-content">
+          <div class="section-header">
+            <h3>🖥️ VNC Screen Capture</h3>
+            <el-button type="primary" @click="startVNCCapture">
+              <el-icon><VideoPlay /></el-icon>
+              Start Capture
+            </el-button>
+          </div>
+          
+          <div class="vnc-container">
+            <div v-if="!vncActive" class="vnc-placeholder">
+              <el-icon size="64" color="#909399"><Monitor /></el-icon>
+              <h3>VNC Not Active</h3>
+              <p>Click "Start Capture" to begin VNC screen capture.</p>
+            </div>
+            
+            <div v-else class="vnc-viewer">
+              <div class="vnc-controls">
+                <el-button @click="stopVNCCapture" type="danger">
+                  <el-icon><VideoPause /></el-icon>
+                  Stop Capture
+                </el-button>
+                <el-button @click="refreshVNC" type="info">
+                  <el-icon><Refresh /></el-icon>
+                  Refresh
+                </el-button>
+              </div>
+              <div class="vnc-screen">
+                <img v-if="vncImage" :src="vncImage" alt="VNC Screen" />
+                <div v-else class="vnc-loading">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <p>Capturing screen...</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+      
+      <!-- Tasks Tab -->
+      <el-tab-pane label="Tasks" name="tasks">
+        <div class="tab-content">
+          <div class="section-header">
+            <h3>📋 Task Management</h3>
+            <el-button type="primary" @click="createTask">
+              <el-icon><Plus /></el-icon>
+              Create Task
+            </el-button>
+          </div>
+          
+          <div v-if="tasks.length === 0" class="empty-state">
+            <el-icon size="64" color="#909399"><Document /></el-icon>
+            <h3>No Tasks</h3>
+            <p>Create tasks to manage agent operations.</p>
+          </div>
+          
+          <el-table v-else :data="tasks" style="width: 100%">
+            <el-table-column prop="id" label="Task ID" width="120" />
+            <el-table-column prop="agentId" label="Agent" width="120" />
+            <el-table-column prop="command" label="Command" width="200" />
+            <el-table-column prop="status" label="Status" width="100">
+              <template #default="scope">
+                <el-tag :type="getTaskStatusType(scope.row.status)">
+                  {{ scope.row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="createdAt" label="Created" width="150" />
+            <el-table-column prop="result" label="Result" width="200" />
+            <el-table-column label="Actions" width="120">
+              <template #default="scope">
+                <el-button size="small" @click="viewTaskResult(scope.row)">
+                  <el-icon><View /></el-icon>
+                  View
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+      
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Refresh, Setting } from '@element-plus/icons-vue'
+import { 
+  Delete, Refresh, Setting, Plus, Edit, View, Close, 
+  Monitor, VideoPlay, VideoPause, Document, Loading 
+} from '@element-plus/icons-vue'
 
 // Reactive data
+const activeTab = ref('agents')
 const listeners = ref<any[]>([])
+const agents = ref<any[]>([])
+const tasks = ref<any[]>([])
 const cleaning = ref(false)
+const vncActive = ref(false)
+const vncImage = ref('')
 
 // Computed properties
 const activeProfilesCount = computed(() => 
@@ -143,12 +294,43 @@ const loadProfiles = async () => {
   }
 }
 
+// Load agents
+const refreshAgents = async () => {
+  try {
+    const response = await fetch('/api/agents')
+    if (response.ok) {
+      const data = await response.json()
+      agents.value = data.agents || []
+    } else {
+      agents.value = []
+    }
+  } catch (error) {
+    console.error('Failed to load agents:', error)
+    agents.value = []
+  }
+}
+
+// Load tasks
+const loadTasks = async () => {
+  try {
+    const response = await fetch('/api/tasks')
+    if (response.ok) {
+      const data = await response.json()
+      tasks.value = data.tasks || []
+    } else {
+      tasks.value = []
+    }
+  } catch (error) {
+    console.error('Failed to load tasks:', error)
+    tasks.value = []
+  }
+}
+
 // Cleanup duplicate profiles
 const cleanupDuplicateProfiles = async () => {
   try {
     cleaning.value = true
     
-    // Find duplicates (same name, port, and host)
     const duplicates = findDuplicateProfiles()
     
     if (duplicates.length === 0) {
@@ -167,13 +349,12 @@ const cleanupDuplicateProfiles = async () => {
     )
     
     if (result === 'confirm') {
-      // Delete duplicates (keep the most recent)
       for (const duplicate of duplicates) {
         await deleteProfile(duplicate.id)
       }
       
       ElMessage.success(`Cleaned up ${duplicates.length} duplicate profiles.`)
-      await loadProfiles() // Reload the list
+      await loadProfiles()
     }
   } catch (error) {
     if (error !== 'cancel') {
@@ -190,7 +371,6 @@ const findDuplicateProfiles = () => {
   const seen = new Map<string, any>()
   const duplicates: any[] = []
   
-  // Sort by creation date (newest first)
   const sorted = [...listeners.value].sort((a, b) => 
     new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   )
@@ -228,7 +408,7 @@ const deleteProfile = async (profileId: string) => {
       
       if (response.ok) {
         ElMessage.success('Profile deleted successfully.')
-        await loadProfiles() // Reload the list
+        await loadProfiles()
       } else {
         ElMessage.error('Failed to delete profile.')
       }
@@ -239,6 +419,117 @@ const deleteProfile = async (profileId: string) => {
       ElMessage.error('Failed to delete profile.')
     }
   }
+}
+
+// VNC functions
+const startVNCCapture = async () => {
+  try {
+    const response = await fetch('/api/vnc/start', { method: 'POST' })
+    if (response.ok) {
+      vncActive.value = true
+      ElMessage.success('VNC capture started.')
+      refreshVNC()
+    } else {
+      ElMessage.error('Failed to start VNC capture.')
+    }
+  } catch (error) {
+    console.error('VNC start failed:', error)
+    ElMessage.error('Failed to start VNC capture.')
+  }
+}
+
+const stopVNCCapture = async () => {
+  try {
+    const response = await fetch('/api/vnc/stop', { method: 'POST' })
+    if (response.ok) {
+      vncActive.value = false
+      vncImage.value = ''
+      ElMessage.success('VNC capture stopped.')
+    } else {
+      ElMessage.error('Failed to stop VNC capture.')
+    }
+  } catch (error) {
+    console.error('VNC stop failed:', error)
+    ElMessage.error('Failed to stop VNC capture.')
+  }
+}
+
+const refreshVNC = async () => {
+  if (!vncActive.value) return
+  
+  try {
+    const response = await fetch('/api/vnc/screenshot')
+    if (response.ok) {
+      const blob = await response.blob()
+      vncImage.value = URL.createObjectURL(blob)
+    }
+  } catch (error) {
+    console.error('VNC refresh failed:', error)
+  }
+}
+
+// Agent functions
+const viewAgent = (agent: any) => {
+  ElMessage.info(`Viewing agent: ${agent.id}`)
+  // TODO: Implement agent detail view
+}
+
+const disconnectAgent = async (agentId: string) => {
+  try {
+    const result = await ElMessageBox.confirm(
+      'Are you sure you want to disconnect this agent?',
+      'Disconnect Agent',
+      {
+        confirmButtonText: 'Disconnect',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }
+    )
+    
+    if (result === 'confirm') {
+      const response = await fetch(`/api/agents/${agentId}/disconnect`, { method: 'POST' })
+      if (response.ok) {
+        ElMessage.success('Agent disconnected.')
+        refreshAgents()
+      } else {
+        ElMessage.error('Failed to disconnect agent.')
+      }
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Disconnect failed:', error)
+      ElMessage.error('Failed to disconnect agent.')
+    }
+  }
+}
+
+// Task functions
+const createTask = () => {
+  ElMessage.info('Create task functionality coming soon...')
+}
+
+const viewTaskResult = (task: any) => {
+  ElMessage.info(`Viewing task result: ${task.id}`)
+  // TODO: Implement task result view
+}
+
+const getTaskStatusType = (status: string) => {
+  switch (status) {
+    case 'completed': return 'success'
+    case 'running': return 'warning'
+    case 'failed': return 'danger'
+    default: return 'info'
+  }
+}
+
+// Listener functions
+const createListener = () => {
+  ElMessage.info('Create listener functionality coming soon...')
+}
+
+const editListener = (listener: any) => {
+  ElMessage.info(`Editing listener: ${listener.name}`)
+  // TODO: Implement listener edit
 }
 
 // Format date
@@ -256,8 +547,10 @@ const handleProfileCreated = () => {
 }
 
 onMounted(() => {
-  // Load profiles
+  // Load initial data
   loadProfiles()
+  refreshAgents()
+  loadTasks()
   
   // Register event listener
   window.addEventListener('profileCreated', handleProfileCreated)
@@ -267,7 +560,7 @@ onMounted(() => {
 <style scoped>
 .dashboard {
   padding: 20px;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 
@@ -277,18 +570,26 @@ h1 {
   margin-bottom: 20px;
 }
 
-.listeners-panel {
+.dashboard-tabs {
   background: white;
   border-radius: 8px;
-  padding: 20px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.panel-header {
+.tab-content {
+  padding: 20px;
+}
+
+.section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.section-header h3 {
+  margin: 0;
+  color: #303133;
 }
 
 .stats-grid {
@@ -337,4 +638,54 @@ h1 {
 .listeners-table {
   margin-top: 20px;
 }
+
+.vnc-container {
+  min-height: 400px;
+}
+
+.vnc-placeholder {
+  text-align: center;
+  padding: 60px;
+  color: #909399;
+}
+
+.vnc-viewer {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.vnc-controls {
+  padding: 15px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e4e7ed;
+  display: flex;
+  gap: 10px;
+}
+
+.vnc-screen {
+  padding: 20px;
+  text-align: center;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vnc-screen img {
+  max-width: 100%;
+  max-height: 400px;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+}
+
+.vnc-loading {
+  color: #909399;
+}
+
+.vnc-loading .el-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+}
 </style>
+
