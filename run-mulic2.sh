@@ -429,11 +429,12 @@ elif [ -f "certs/server.crt" ] && [ -f "certs/server.key" ]; then
     
     # Check if listeners table exists and activate the main listener
     if psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT 1 FROM information_schema.tables WHERE table_name='listeners';" | grep -q "1" 2>/dev/null; then
-        # Update the main listener to be active and use TLS
-        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = true, use_tls = true WHERE id = 'main';" 2>/dev/null || true
+        # Update ALL listeners to use TLS and be active
+        echo "🔧 Updating all listeners to use TLS..."
+        psql $PSQL_FLAGS -U postgres -d mulic2_db -c "UPDATE listeners SET is_active = true, use_tls = true WHERE port = 23456;" 2>/dev/null || true
         
-        # If no rows were updated, insert the listener
-        if [ $? -ne 0 ] || [ $(psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT COUNT(*) FROM listeners WHERE id = 'main';" -t | tr -d ' ') -eq 0 ]; then
+        # If no rows were updated, insert the main listener
+        if [ $? -ne 0 ] || [ $(psql $PSQL_FLAGS -U postgres -d mulic2_db -c "SELECT COUNT(*) FROM listeners WHERE port = 23456;" -t | tr -d ' ') -eq 0 ]; then
             echo "📝 Creating main C2 listener in database..."
             psql $PSQL_FLAGS -U postgres -d mulic2_db -c "INSERT INTO listeners (id, name, host, port, use_tls, cert_file, key_file, is_active, created_at) VALUES ('main', 'Main C2', '0.0.0.0', 23456, true, '../server.crt', '../server.key', true, NOW()) ON CONFLICT (id) DO UPDATE SET is_active = true, use_tls = true;" 2>/dev/null || true
         fi
