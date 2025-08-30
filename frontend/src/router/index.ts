@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from '@/services/auth'
+import Dashboard from '@/views/Dashboard.vue'
+import ProfileSelection from '@/views/ProfileSelection.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -7,13 +9,13 @@ const router = createRouter({
     {
       path: '/',
       name: 'Dashboard',
-      component: () => import('@/views/Dashboard.vue'),
+      component: Dashboard,
       meta: { title: 'Dashboard', icon: 'DataBoard', requiresAuth: true }
     },
     {
       path: '/profile-selection',
       name: 'ProfileSelection',
-      component: () => import('@/views/ProfileSelection.vue'),
+      component: ProfileSelection,
       meta: { title: 'Profile Selection', requiresAuth: true, hideFromMenu: true }
     },
 

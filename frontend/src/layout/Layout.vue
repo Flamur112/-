@@ -59,12 +59,21 @@
           <Dashboard />
         </div>
         
-        <router-view v-slot="{ Component }">
-          <component :is="Component" />
-          <div v-if="!Component" style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #dc3545;">
+        <router-view v-slot="{ Component, route }">
+          <div style="background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #dee2e6;">
+            <h4>🔍 Router-View Debug</h4>
+            <p><strong>Component:</strong> {{ Component ? 'Component loaded' : 'No component' }}</p>
+            <p><strong>Component type:</strong> {{ typeof Component }}</p>
+            <p><strong>Route:</strong> {{ route?.path }}</p>
+            <p><strong>Route name:</strong> {{ route?.name }}</p>
+          </div>
+          
+          <component :is="Component" v-if="Component" />
+          <div v-else style="background: #f8d7da; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #dc3545;">
             <h3>❌ No Component Rendered</h3>
             <p>The router-view is not rendering any component.</p>
             <p>This indicates a routing or component loading issue.</p>
+            <p><strong>Debug:</strong> Component is {{ Component === null ? 'null' : Component === undefined ? 'undefined' : 'other' }}</p>
           </div>
         </router-view>
       </div>
