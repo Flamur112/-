@@ -329,17 +329,55 @@ func main() {
 	// Test CORS endpoint
 	router.HandleFunc("/test-cors", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("CORS test request received from %s", r.RemoteAddr)
+		log.Printf("Request headers: %v", r.Header)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"message": "CORS is working!",
 			"method":  r.Method,
 			"origin":  r.Header.Get("Origin"),
+			"path":    r.URL.Path,
+		})
+	}).Methods("GET", "POST", "OPTIONS")
+
+	// Debug endpoint to test routing
+	router.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Debug request received from %s", r.RemoteAddr)
+		log.Printf("Request method: %s", r.Method)
+		log.Printf("Request path: %s", r.URL.Path)
+		log.Printf("Request headers: %v", r.Header)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Debug endpoint working",
+			"method":  r.Method,
+			"path":    r.URL.Path,
+			"headers": r.Header,
+			"remote":  r.RemoteAddr,
 		})
 	}).Methods("GET", "POST", "OPTIONS")
 
 	// Create API subrouter
 	api := router.PathPrefix("/api").Subrouter()
+
+	// Apply CORS middleware to API subrouter as well
+	api.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set CORS headers for ALL API requests
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+			// Handle preflight OPTIONS request
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Health check endpoint - FIRST for testing
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -360,6 +398,20 @@ func main() {
 			},
 		})
 	}).Methods("GET", "OPTIONS")
+
+	// Simple test endpoint without database
+	api.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Test endpoint request received from %s", r.RemoteAddr)
+		log.Printf("Request headers: %v", r.Header)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":   "Test endpoint working!",
+			"method":    r.Method,
+			"path":      r.URL.Path,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	}).Methods("GET", "POST", "OPTIONS")
 
 	// Profile endpoints - NO AUTH REQUIRED
 	log.Printf("Registering profile endpoints...")
@@ -436,8 +488,11 @@ func main() {
 	// Profile list endpoint
 	api.HandleFunc("/profile/list", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Profile list request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		log.Printf("Request headers: %v", r.Header)
+		log.Printf("Request method: %s", r.Method)
 
 		if r.Method != "GET" {
+			log.Printf("Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
