@@ -570,12 +570,12 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 		frameLengthLE := binary.LittleEndian.Uint32(peekBytes[:4])
 		log.Printf("🔍 DEBUG: Frame length (little-endian): %d bytes", frameLengthLE)
 
-		// Check for PowerShell VNC specifically FIRST (JPEG frames, typically 1KB to 50KB)
-		if (frameLengthBE >= 1024 && frameLengthBE <= 1024*50) ||
-			(frameLengthLE >= 1024 && frameLengthLE <= 1024*50) {
+		// Check for PowerShell VNC specifically FIRST (JPEG frames, typically 100B to 100KB)
+		if (frameLengthBE >= 100 && frameLengthBE <= 1024*100) ||
+			(frameLengthLE >= 100 && frameLengthLE <= 1024*100) {
 
 			var frameLength uint32
-			if frameLengthBE >= 1024 && frameLengthBE <= 1024*50 {
+			if frameLengthBE >= 100 && frameLengthBE <= 1024*100 {
 				frameLength = frameLengthBE
 				log.Printf("🔍 DEBUG: PowerShell VNC detected with big-endian: %d bytes", frameLength)
 			} else {

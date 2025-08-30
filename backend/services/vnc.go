@@ -170,7 +170,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 				frameLength, totalFrameSize, len(pendingData))
 
 			// Validate frame length - be more permissive for small test images
-			if frameLength < 10 || frameLength > 2*1024*1024 { // Allow up to 2MB frames
+			if frameLength < 1 || frameLength > 2*1024*1024 { // Allow frames as small as 1 byte, up to 2MB
 				log.Printf("🔍 Invalid frame length from %s: %d bytes, resyncing buffer", vncConn.ID, frameLength)
 				// Look for next potential frame header
 				pendingData = vs.findNextFrameHeader(pendingData[1:])
@@ -235,7 +235,7 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 func (vs *VNCService) findNextFrameHeader(data []byte) []byte {
 	for i := 0; i < len(data)-4; i++ {
 		frameLength := binary.LittleEndian.Uint32(data[i : i+4])
-		if frameLength >= 10 && frameLength <= 2*1024*1024 {
+		if frameLength >= 1 && frameLength <= 2*1024*1024 {
 			log.Printf("🔍 Found potential frame header at offset %d, length %d", i, frameLength)
 			return data[i:]
 		}
