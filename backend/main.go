@@ -275,21 +275,11 @@ func createTables(db *sql.DB) error {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Dynamic CORS for SPA with credentials
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
+		// Set CORS headers for all requests
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		reqHeaders := r.Header.Get("Access-Control-Request-Headers")
-		if reqHeaders == "" {
-			reqHeaders = "Content-Type, Authorization"
-		}
-		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
@@ -490,12 +480,23 @@ func main() {
 
 	// Health check endpoint
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Health check request received")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"service":   "MuliC2 Backend",
+		})
+	}).Methods("GET")
+
+	// Simple test endpoint
+	api.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Test endpoint request received")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Test endpoint working!",
 		})
 	}).Methods("GET")
 
@@ -606,9 +607,9 @@ func main() {
 	log.Printf("Starting HTTP server on port %d", config.Server.APIPort)
 	log.Printf("Router configured with API subrouter")
 
-	// Start server in goroutine
+	// Start server in background goroutine
 	go func() {
-		log.Printf("🔄 HTTP server goroutine starting...")
+		log.Printf("🔄 HTTP server starting on :%d...", config.Server.APIPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("❌ HTTP server error: %v", err)
 		} else {
@@ -616,27 +617,17 @@ func main() {
 		}
 	}()
 
-	// Give the server a moment to start up
-	log.Printf("⏳ Waiting for HTTP server to start up...")
-	time.Sleep(2 * time.Second)
+	// Give the server time to start up
+	log.Printf("⏳ Waiting for server to start up...")
+	time.Sleep(3 * time.Second)
 
-	// Test if server is responding with multiple attempts
-	maxAttempts := 5
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		log.Printf("🔄 Testing server response (attempt %d/%d)...", attempt, maxAttempts)
-
-		if resp, err := http.Get("http://localhost:8080/api/health"); err == nil {
-			resp.Body.Close()
-			log.Printf("✅ HTTP server is ready and responding (attempt %d)", attempt)
-			break
-		} else {
-			log.Printf("⚠️  Attempt %d failed: %v", attempt, err)
-			if attempt < maxAttempts {
-				time.Sleep(1 * time.Second)
-			} else {
-				log.Printf("❌ HTTP server failed to respond after %d attempts", maxAttempts)
-			}
-		}
+	// Test if server is responding
+	log.Printf("🔄 Testing server response...")
+	if resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/health", config.Server.APIPort)); err == nil {
+		resp.Body.Close()
+		log.Printf("✅ HTTP server is ready and responding")
+	} else {
+		log.Printf("⚠️  HTTP server may not be fully ready: %v", err)
 	}
 
 	// Wait for interrupt signal
