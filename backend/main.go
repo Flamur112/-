@@ -99,9 +99,27 @@ func getVNCConnections() []VNCConnection {
 
 // loadConfig loads configuration from config.json
 func loadConfig() (*Config, error) {
-	data, err := os.ReadFile("config.json")
+	// Try multiple paths for config.json
+	configPaths := []string{
+		"config.json",    // Current directory
+		"../config.json", // Parent directory
+		"./config.json",  // Explicit current directory
+	}
+
+	var data []byte
+	var err error
+
+	for _, path := range configPaths {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			log.Printf("Found config.json at: %s", path)
+			break
+		}
+		log.Printf("Tried config path: %s - %v", path, err)
+	}
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read config file from any path: %w", err)
 	}
 
 	var config Config
@@ -330,25 +348,34 @@ func main() {
 
 	// Load and start profiles from config.json
 	log.Printf("Loading profiles from config.json...")
-	for _, profile := range config.Profiles {
-		log.Printf("Starting listener for profile: %s (Port: %d, TLS: %v)",
-			profile.Name, profile.Port, profile.UseTLS)
+	log.Printf("Total profiles found: %d", len(config.Profiles))
 
-		// Convert config profile to service profile
-		serviceProfile := &services.Profile{
-			ID:          profile.ID,
-			Name:        profile.Name,
-			ProjectName: profile.ProjectName,
-			Host:        profile.Host,
-			Port:        profile.Port,
-			Description: profile.Description,
-			UseTLS:      profile.UseTLS,
-			CertFile:    profile.CertFile,
-			KeyFile:     profile.KeyFile,
-		}
+	if len(config.Profiles) == 0 {
+		log.Printf("⚠️  WARNING: No profiles found in config.json!")
+	} else {
+		for i, profile := range config.Profiles {
+			log.Printf("Profile %d: %s (Port: %d, TLS: %v, Cert: %s, Key: %s)",
+				i+1, profile.Name, profile.Port, profile.UseTLS, profile.CertFile, profile.KeyFile)
 
-		if err := listenerService.StartListener(serviceProfile); err != nil {
-			log.Printf("Failed to start listener for profile %s: %v", profile.Name, err)
+			// Convert config profile to service profile
+			serviceProfile := &services.Profile{
+				ID:          profile.ID,
+				Name:        profile.Name,
+				ProjectName: profile.ProjectName,
+				Host:        profile.Host,
+				Port:        profile.Port,
+				Description: profile.Description,
+				UseTLS:      profile.UseTLS,
+				CertFile:    profile.CertFile,
+				KeyFile:     profile.KeyFile,
+			}
+
+			log.Printf("Starting listener for profile: %s...", profile.Name)
+			if err := listenerService.StartListener(serviceProfile); err != nil {
+				log.Printf("❌ Failed to start listener for profile %s: %v", profile.Name, err)
+			} else {
+				log.Printf("✅ Successfully started listener for profile %s", profile.Name)
+			}
 		}
 	}
 
