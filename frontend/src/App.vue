@@ -38,7 +38,7 @@ const createDefaultProfile = async () => {
       name: 'Default C2',
       projectName: 'MuliC2',
       host: '0.0.0.0',
-      port: 23456, // Use the port from your config.json
+      port: 23457, // Use a different port to avoid conflict with existing listener
       description: 'Default C2 profile with TLS enabled',
       useTLS: true,
       certFile: '../server.crt',
