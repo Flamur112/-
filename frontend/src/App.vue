@@ -67,6 +67,9 @@ const createDefaultProfile = async () => {
       hasSelectedProfile.value = true
       
       console.log('Default profile activated successfully')
+      
+      // Emit event to notify dashboard that profile was created
+      window.dispatchEvent(new CustomEvent('profileCreated', { detail: profile }))
     } else {
       const errorText = await response.text()
       console.error('Failed to create default profile:', response.status, response.statusText)

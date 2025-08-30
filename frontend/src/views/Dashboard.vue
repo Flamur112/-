@@ -1291,8 +1291,20 @@ const getTaskStatusColor = (status: string) => {
 onMounted(() => {
   console.log('[DEBUG] Dashboard.vue mounted')
   updateStats()
-  loadDashboardData()
-  loadProfiles() // Load profiles on mount
+  loadProfiles() // Load profiles from our unprotected endpoint
+  
+  // Listen for profile creation events
+  const handleProfileCreated = () => {
+    console.log('Profile created event detected, reloading profiles...')
+    loadProfiles()
+  }
+  
+  window.addEventListener('profileCreated', handleProfileCreated)
+  
+  // Clean up on unmount
+  onUnmounted(() => {
+    window.removeEventListener('profileCreated', handleProfileCreated)
+  })
 })
 
 // Watch for listener selection changes
