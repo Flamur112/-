@@ -4,6 +4,7 @@ import (
 	"bufio" // Added for httpConn
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io" // Added for io.EOF
@@ -104,6 +105,13 @@ func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error
 		ClientAuth: tls.NoClientCert,
 		// Add session ticket support for better performance
 		SessionTicketsDisabled: false,
+		// Add more permissive settings for debugging
+		InsecureSkipVerify: false, // Keep certificate validation
+		// Add better error handling
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			log.Printf("TLS: Client certificate verification - %d raw certs, %d verified chains", len(rawCerts), len(verifiedChains))
+			return nil // Accept all certificates for now
+		},
 	}
 
 	return tlsConfig, nil

@@ -1,16 +1,15 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -19,10 +18,7 @@ import (
 	"mulic2/services"
 	"mulic2/utils"
 
-	"bytes"
-
 	"github.com/gorilla/mux"
-	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
 )
 
@@ -103,35 +99,7 @@ func getVNCConnections() []VNCConnection {
 
 // loadConfig loads configuration from config.json
 func loadConfig() (*Config, error) {
-	configFile := "config.json"
-
-	// Check if config file exists
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		// Create default config if it doesn't exist
-		defaultConfig := &Config{}
-		defaultConfig.Server.APIPort = 8080
-		defaultConfig.Server.C2DefaultPort = 8081
-		defaultConfig.Database.Type = "postgres"
-		defaultConfig.Database.Host = "localhost"
-		defaultConfig.Database.Port = 5432
-		defaultConfig.Database.User = "postgres"
-		defaultConfig.Database.Password = "postgres"
-		defaultConfig.Database.DBName = "mulic2_db"
-		defaultConfig.Database.SSLMode = "disable"
-		defaultConfig.Logging.Level = "info"
-
-		// Save default config
-		configData, _ := json.MarshalIndent(defaultConfig, "", "  ")
-		os.WriteFile(configFile, configData, 0644)
-
-		log.Printf("Created default config.json with ports: API=%d, C2=%d",
-			defaultConfig.Server.APIPort, defaultConfig.Server.C2DefaultPort)
-
-		return defaultConfig, nil
-	}
-
-	// Read existing config
-	data, err := os.ReadFile(configFile)
+	data, err := os.ReadFile("config.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -142,6 +110,177 @@ func loadConfig() (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// connectDB establishes database connection
+func connectDB() (*sql.DB, error) {
+	config, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		config.Database.Host, config.Database.Port, config.Database.User,
+		config.Database.Password, config.Database.DBName, config.Database.SSLMode)
+
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// createTables creates all necessary database tables
+func createTables(db *sql.DB) error {
+	// Create users table
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id SERIAL PRIMARY KEY,
+			username VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			email VARCHAR(255),
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			last_login TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create users table: %w", err)
+	}
+
+	// Create agents table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS agents (
+			id SERIAL PRIMARY KEY,
+			agent_id VARCHAR(255) UNIQUE NOT NULL,
+			hostname VARCHAR(255),
+			ip_address VARCHAR(45),
+			username VARCHAR(255),
+			os_info VARCHAR(255),
+			status VARCHAR(32) DEFAULT 'offline',
+			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create agents table: %w", err)
+	}
+
+	// Create tasks table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS tasks (
+			id SERIAL PRIMARY KEY,
+			agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			command TEXT NOT NULL,
+			status VARCHAR(32) DEFAULT 'pending',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			started_at TIMESTAMP,
+			completed_at TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create tasks table: %w", err)
+	}
+
+	// Create results table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS results (
+			task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+			output TEXT,
+			completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create results table: %w", err)
+	}
+
+	// Create profiles table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS profiles (
+			id VARCHAR(128) PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			project_name VARCHAR(255),
+			host VARCHAR(64) DEFAULT '0.0.0.0',
+			port INTEGER NOT NULL,
+			description TEXT,
+			use_tls BOOLEAN DEFAULT true,
+			cert_file VARCHAR(512),
+			key_file VARCHAR(512),
+			poll_interval INTEGER DEFAULT 5,
+			is_active BOOLEAN DEFAULT true,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create profiles table: %w", err)
+	}
+
+	// Create user_settings table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_settings (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			listener_ip VARCHAR(45) DEFAULT '0.0.0.0',
+			listener_port INTEGER DEFAULT 8080,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create user_settings table: %w", err)
+	}
+
+	// Create audit_logs table
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_logs (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL,
+			action VARCHAR(100) NOT NULL,
+			details TEXT,
+			ip_address VARCHAR(45),
+			user_agent TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to create audit_logs table: %w", err)
+	}
+
+	return nil
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Dynamic CORS for SPA with credentials
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		reqHeaders := r.Header.Get("Access-Control-Request-Headers")
+		if reqHeaders == "" {
+			reqHeaders = "Content-Type, Authorization"
+		}
+		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
@@ -162,6 +301,11 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
+	log.Printf("Configuration loaded successfully")
+	log.Printf("Server config: API Port=%d, C2 Default Port=%d, TLS Enabled=%v",
+		config.Server.APIPort, config.Server.C2DefaultPort, config.Server.TLSEnabled)
+	log.Printf("Profiles loaded: %d", len(config.Profiles))
+
 	// Database connection
 	db, err := connectDB()
 	if err != nil {
@@ -175,9 +319,38 @@ func main() {
 	}
 	log.Println("Successfully connected to database")
 
-	// Initialize listener service - MOVED BEFORE HANDLERS
+	// Create tables
+	if err := createTables(db); err != nil {
+		log.Fatalf("Failed to create tables: %v", err)
+	}
+
+	// Initialize listener service
 	listenerService := services.NewListenerService()
 	defer listenerService.Close()
+
+	// Load and start profiles from config.json
+	log.Printf("Loading profiles from config.json...")
+	for _, profile := range config.Profiles {
+		log.Printf("Starting listener for profile: %s (Port: %d, TLS: %v)",
+			profile.Name, profile.Port, profile.UseTLS)
+
+		// Convert config profile to service profile
+		serviceProfile := &services.Profile{
+			ID:          profile.ID,
+			Name:        profile.Name,
+			ProjectName: profile.ProjectName,
+			Host:        profile.Host,
+			Port:        profile.Port,
+			Description: profile.Description,
+			UseTLS:      profile.UseTLS,
+			CertFile:    profile.CertFile,
+			KeyFile:     profile.KeyFile,
+		}
+
+		if err := listenerService.StartListener(serviceProfile); err != nil {
+			log.Printf("Failed to start listener for profile %s: %v", profile.Name, err)
+		}
+	}
 
 	// Initialize listener storage
 	listenerStorage := services.NewListenerStorage(db)
@@ -210,6 +383,16 @@ func main() {
 	api.Handle("/agents", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.ListAgents))).Methods("GET")
 	api.Handle("/tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.EnqueueTask))).Methods("POST")
 	api.Handle("/agent-tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.GetAgentTasks))).Methods("GET")
+
+	// Agent template download endpoint (protected)
+	api.Handle("/agent/template", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=vnc_agent_template.ps1")
+
+		// Read and serve the updated agent template
+		templatePath := "../frontend/src/utils/vnc_agent_template.ps1"
+		http.ServeFile(w, r, templatePath)
+	}))).Methods("GET")
 
 	// Listener management endpoints (protected)
 	api.Handle("/listeners", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -299,876 +482,40 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "started"})
 	}))).Methods("POST")
 
-	api.Handle("/listeners/{id}/stop", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-
-		// Update listener status to inactive
-		if err := listenerStorage.UpdateListenerStatus(id, false); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Stop the listener service
-		if err := listenerService.StopListener(id); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to stop listener: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
-	}))).Methods("POST")
-
-	api.Handle("/listeners/{id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		id := vars["id"]
-
-		if r.Method == "DELETE" {
-			// Delete listener
-			if err := listenerStorage.DeleteListener(id); err != nil {
-				http.Error(w, fmt.Sprintf("Failed to delete listener: %v", err), http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
-		}
-	}))).Methods("DELETE")
-
-	// Agent template download endpoint (protected)
-	api.Handle("/agent/template", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", "attachment; filename=vnc_agent_template.ps1")
-
-		// Read and serve the updated agent template
-		templatePath := "../frontend/src/utils/vnc_agent_template.ps1"
-		http.ServeFile(w, r, templatePath)
-	}))).Methods("GET")
-
-	// Profile management endpoints (protected)
-	api.Handle("/profile/list", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get all profiles from config
-		profiles := []map[string]interface{}{}
-		for _, profile := range config.Profiles {
-			profiles = append(profiles, map[string]interface{}{
-				"id":          profile.ID,
-				"name":        profile.Name,
-				"projectName": profile.ProjectName,
-				"host":        profile.Host,
-				"port":        profile.Port,
-				"description": profile.Description,
-				"useTLS":      profile.UseTLS,
-				"certFile":    profile.CertFile,
-				"keyFile":     profile.KeyFile,
-				"isActive":    false, // Default to inactive
-			})
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"profiles": profiles,
-		})
-	}))).Methods("GET")
-
-	// VNC endpoints (protected) - Updated to integrate with listener service
-	api.Handle("/vnc/connections", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("VNC connections endpoint called")
-
-		// Get connections from VNC service if it exists
-		var connections []VNCConnection
-
-		// Try to get VNC service from listener service
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			// Get connections from VNC service
-			vncConnections := vncService.GetActiveConnections()
-			for _, conn := range vncConnections {
-				connections = append(connections, VNCConnection{
-					ConnectionID: conn["id"].(string),
-					Hostname:     conn["hostname"].(string),
-					AgentIP:      conn["agent_ip"].(string),
-					Resolution:   conn["resolution"].(string),
-					FPS:          conn["fps"].(int),
-					ConnectedAt:  conn["connected_at"].(time.Time),
-				})
-			}
-		} else {
-			// Fallback to thread-safe global map
-			connections = getVNCConnections()
-		}
-
-		log.Printf("Returning %d active VNC connections", len(connections))
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"connections": connections,
-		})
-	}))).Methods("GET")
-
-	// VNC frame streaming endpoint (Server-Sent Events) - Enhanced version
-	api.Handle("/vnc/stream", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("VNC stream endpoint called")
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
-		// Create a channel to detect client disconnect
-		notify := r.Context().Done()
-
-		// Send initial connection message
-		fmt.Fprintf(w, "data: %s\n\n", `{"status":"connected","message":"VNC stream ready"}`)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-
-		// Try to get actual VNC service
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			// Get frame channel from VNC service
-			frameChannel := vncService.GetFrameChannel()
-
-			for {
-				select {
-				case frame, ok := <-frameChannel:
-					if !ok {
-						log.Printf("VNC frame channel closed")
-						return
-					}
-					// Send actual VNC frame
-					frameData := map[string]interface{}{
-						"connection_id": frame.ConnectionID,
-						"timestamp":     frame.Timestamp,
-						"width":         frame.Width,
-						"height":        frame.Height,
-						"image_data":    frame.Data, // Base64 encoded frame data
-						"size":          frame.Size,
-					}
-					frameJSON, _ := json.Marshal(frameData)
-					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
-					if flusher, ok := w.(http.Flusher); ok {
-						flusher.Flush()
-					}
-
-				case <-notify:
-					log.Printf("VNC stream client disconnected")
-					return
-				}
-			}
-		} else {
-			// Fallback: Send periodic test frames (existing behavior)
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					// Send a test frame
-					testFrame := map[string]interface{}{
-						"connection_id": "test-vnc",
-						"timestamp":     time.Now().Unix(),
-						"width":         800,
-						"height":        600,
-						"image_data":    "", // Empty for now
-						"size":          0,
-						"status":        "test_mode",
-					}
-
-					frameJSON, _ := json.Marshal(testFrame) // Fixed: use testFrame instead of frameData
-					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
-					if flusher, ok := w.(http.Flusher); ok {
-						flusher.Flush()
-					}
-
-				case <-notify:
-					log.Printf("VNC stream client disconnected")
-					return
-				}
-			}
-		}
-	}))).Methods("GET")
-
-	// ADDITION: Register /api/vnc/stream endpoint for frontend compatibility
-	api.Handle("/api/vnc/stream", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("/api/vnc/stream endpoint called")
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		// Create a channel to detect client disconnect
-		notify := r.Context().Done()
-		// Send initial connection message
-		fmt.Fprintf(w, "data: %s\n\n", `{"status":"connected","message":"VNC stream ready"}`)
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			frameChannel := vncService.GetFrameChannel()
-			for {
-				select {
-				case frame, ok := <-frameChannel:
-					if !ok {
-						log.Printf("VNC frame channel closed (/api/vnc/stream)")
-						return
-					}
-					frameData := map[string]interface{}{
-						"connection_id": frame.ConnectionID,
-						"timestamp":     frame.Timestamp,
-						"width":         frame.Width,
-						"height":        frame.Height,
-						"image_data":    frame.Data,
-						"size":          frame.Size,
-					}
-					frameJSON, _ := json.Marshal(frameData)
-					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
-					if flusher, ok := w.(http.Flusher); ok {
-						flusher.Flush()
-					}
-				case <-notify:
-					log.Printf("/api/vnc/stream client disconnected")
-					return
-				}
-			}
-		} else {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					testFrame := map[string]interface{}{
-						"connection_id": "test-vnc",
-						"timestamp":     time.Now().Unix(),
-						"width":         800,
-						"height":        600,
-						"image_data":    "",
-						"size":          0,
-						"status":        "test_mode",
-					}
-					frameJSON, _ := json.Marshal(testFrame)
-					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
-					if flusher, ok := w.(http.Flusher); ok {
-						flusher.Flush()
-					}
-				case <-notify:
-					log.Printf("/api/vnc/stream client disconnected")
-					return
-				}
-			}
-		}
-	}))).Methods("GET")
-
-	// VNC connection control endpoints
-	api.Handle("/vnc/connect", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request struct {
-			AgentID    string `json:"agent_id"`
-			Resolution string `json:"resolution,omitempty"`
-			FPS        int    `json:"fps,omitempty"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		if request.Resolution == "" {
-			request.Resolution = "1920x1080"
-		}
-		if request.FPS == 0 {
-			request.FPS = 30
-		}
-
-		// VNC connections are initiated by agents connecting to the C2 listener
-		// The VNC service handles incoming connections automatically
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			// Get current active connections to see if the agent is already connected
-			activeConnections := vncService.GetActiveConnections()
-
-			// Check if we already have a connection from this agent
-			var existingConnectionID string
-			for _, conn := range activeConnections {
-				if agentIP, ok := conn["agent_ip"].(string); ok && strings.Contains(agentIP, request.AgentID) {
-					existingConnectionID = conn["id"].(string)
-					break
-				}
-			}
-
-			if existingConnectionID != "" {
-				// Return existing connection info
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success":       true,
-					"message":       "VNC connection already active",
-					"connection_id": existingConnectionID,
-				})
-			} else {
-				// No active connection - agent needs to connect
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"success": false,
-					"message": "No active VNC connection. Agent must connect to the C2 listener first.",
-				})
-			}
-		} else {
-			// Fallback: Create mock connection
-			connectionID := fmt.Sprintf("vnc_%s_%d", request.AgentID, time.Now().Unix())
-			mockConnection := &VNCConnection{
-				ConnectionID: connectionID,
-				Hostname:     fmt.Sprintf("agent-%s", request.AgentID),
-				AgentIP:      "127.0.0.1",
-				Resolution:   request.Resolution,
-				FPS:          request.FPS,
-				ConnectedAt:  time.Now(),
-			}
-
-			addVNCConnection(connectionID, mockConnection)
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":        "connected",
-				"connection_id": connectionID,
-				"message":       "Mock VNC connection created",
-			})
-		}
-	}))).Methods("POST")
-
-	// VNC disconnect endpoint - FIXED
-	api.Handle("/vnc/disconnect/{connection_id}", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		connectionID := vars["connection_id"]
-
-		if connectionID == "" {
-			http.Error(w, "Connection ID is required", http.StatusBadRequest)
-			return
-		}
-
-		// Try to disconnect through VNC service
-		if vncService := listenerService.GetVNCService(); vncService != nil {
-			if err := vncService.CloseConnection(connectionID); err != nil {
-				http.Error(w, fmt.Sprintf("Failed to disconnect VNC: %v", err), http.StatusInternalServerError)
-				return
-			}
-			log.Printf("VNC connection %s disconnected successfully", connectionID)
-		} else {
-			// Fallback: Remove from thread-safe global map
-			removeVNCConnection(connectionID)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "disconnected",
-			"message": "VNC connection terminated",
-		})
-	}))).Methods("DELETE")
-
-	// WebSocket endpoint for VNC input events
-	api.HandleFunc("/vnc/input/ws", func(w http.ResponseWriter, r *http.Request) {
-		// Authenticate user (reuse AuthMiddleware logic)
-		tokenString := r.Header.Get("Authorization")
-		if tokenString == "" {
-			tokenString = r.URL.Query().Get("token")
-		} else if strings.HasPrefix(tokenString, "Bearer ") {
-			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-		}
-		if tokenString == "" {
-			http.Error(w, "No authorization token provided", http.StatusUnauthorized)
-			return
-		}
-		claims, err := utils.ValidateJWT(tokenString)
-		if err != nil {
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
-			return
-		}
-		_, _, _, err = utils.ExtractUserFromJWT(claims)
-		if err != nil {
-			http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-			return
-		}
-
-		// Get connection_id from query
-		connectionID := r.URL.Query().Get("connection_id")
-		if connectionID == "" {
-			http.Error(w, "Missing connection_id", http.StatusBadRequest)
-			return
-		}
-
-		// Upgrade to WebSocket
-		upgrader := websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		}
-		wsConn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Printf("WebSocket upgrade failed: %v", err)
-			return
-		}
-		defer wsConn.Close()
-
-		log.Printf("VNC input WebSocket connected for connection_id: %s", connectionID)
-
-		// Forward input events to the VNC agent
-		for {
-			_, message, err := wsConn.ReadMessage()
-			if err != nil {
-				log.Printf("WebSocket read error: %v", err)
-				break
-			}
-			log.Printf("[VNC INPUT] Received input event for connection_id %s: %s", connectionID, string(message))
-			// Self-test echo logic
-			if bytes.Contains(message, []byte(`\"event\":\"selftest\"`)) || bytes.Contains(message, []byte(`"event":"selftest"`)) {
-				log.Printf("[VNC INPUT] Self-test event received, echoing confirmation to frontend.")
-				err := wsConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"test","event":"selftest-confirm"}`))
-				if err != nil {
-					log.Printf("[VNC INPUT] Failed to send selftest-confirm: %v", err)
-				}
-				continue
-			}
-			// Forward the raw message to the VNCService for routing
-			if vncService := listenerService.GetVNCService(); vncService != nil {
-				err := vncService.ForwardInputEvent(connectionID, message)
-				if err != nil {
-					log.Printf("Failed to forward input event: %v", err)
-				}
-			}
-		}
-		log.Printf("VNC input WebSocket disconnected for connection_id: %s", connectionID)
-	})
-
-	// Health check endpoint
-	router.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "healthy", "service": "mulic2"}`))
-	}).Methods("GET")
-
-	// Set router for unified API mode
-	if config.Server.APIUnified {
-		listenerService.SetRouter(router)
-		log.Printf("🔗 Router configured for unified API mode")
+	// Start HTTP server
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%d", config.Server.APIPort),
+		Handler: router,
 	}
 
-	// Start server
-	apiPort := fmt.Sprintf("%d", config.Server.APIPort)
-	c2Port := fmt.Sprintf("%d", config.Server.C2DefaultPort)
+	log.Printf("Starting HTTP server on port %d", config.Server.APIPort)
 
-	// Validate ports before starting
-	if config.Server.APIPort <= 0 || config.Server.APIPort > 65535 {
-		log.Fatalf("Invalid API port: %d. Port must be between 1 and 65535", config.Server.APIPort)
-	}
-	if config.Server.C2DefaultPort <= 0 || config.Server.C2DefaultPort > 65535 {
-		log.Fatalf("Invalid C2 default port: %d. Port must be between 1 and 65535", config.Server.C2DefaultPort)
-	}
-
-	// Check unified API mode
-	if config.Server.APIUnified {
-		log.Printf("🔗 UNIFIED MODE: API will be served through TLS listener on port %d", config.Server.APIUnifiedPort)
-		if config.Server.APIPort == config.Server.APIUnifiedPort {
-			log.Printf("⚠️  WARNING: API port and unified port are the same - API will be served through TLS")
+	// Start server in goroutine
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
 		}
-	} else {
-		// In separated mode, allow same ports since we support protocol multiplexing
-		if config.Server.APIPort == config.Server.C2DefaultPort {
-			log.Printf("🔀 MULTIPLEXED MODE: API (%d) and C2 (%d) using same port - protocol multiplexing enabled",
-				config.Server.APIPort, config.Server.C2DefaultPort)
-			log.Printf("⚠️  Note: VNC traffic will be auto-detected and routed to VNC handler")
-		} else {
-			log.Printf("🔌 SEPARATED MODE: API on port %s, C2 listeners on separate ports", apiPort)
-		}
-	}
+	}()
 
-	log.Printf("Starting MuliC2 server on port %s", apiPort)
-	log.Printf("C2 listeners will use port %s by default", c2Port)
-	log.Printf("⚠️  IMPORTANT: C2 listeners will ONLY use the exact ports specified in profiles - NO FALLBACK PORTS!")
-
-	// Test if API port is available (only in separated mode when ports are different)
-	if !config.Server.APIUnified && config.Server.APIPort != config.Server.C2DefaultPort {
-		testListener, err := net.Listen("tcp", ":"+apiPort)
-		if err != nil {
-			log.Fatalf("❌ FAILED: Cannot bind to API port %s: %v", apiPort, err)
-		}
-		testListener.Close()
-		log.Printf("✅ API port %s is available", apiPort)
-	}
-
-	// Set up graceful shutdown
+	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Start server in a goroutine (only in separated mode)
-	if !config.Server.APIUnified {
-		go func() {
-			log.Printf("Server starting on port %s...", apiPort)
-			addr := ":" + apiPort
-			log.Printf("Binding to address: %s", addr)
-			if err := http.ListenAndServe(addr, withGlobalCORS(router)); err != nil {
-				log.Printf("Server error: %v", err)
-			}
-		}()
-
-		// Wait a moment for server to start
-		time.Sleep(2 * time.Second)
-		log.Println("Server is ready and listening")
-	}
-
-	// Initialize listener storage and load default profiles
-	log.Println("🔒 Initializing listener management system...")
-
-	if err := listenerStorage.Initialize(); err != nil {
-		log.Fatalf("❌ Failed to initialize listener storage: %v", err)
-	}
-
-	// Load default profiles from config.json into database (but don't start them)
-	// Convert config profiles to services.Profile type
-	var defaultProfiles []services.Profile
-	for _, profileConfig := range config.Profiles {
-		profile := services.Profile{
-			ID:          profileConfig.ID,
-			Name:        profileConfig.Name,
-			ProjectName: profileConfig.ProjectName,
-			Host:        profileConfig.Host,
-			Port:        profileConfig.Port,
-			Description: profileConfig.Description,
-			UseTLS:      profileConfig.UseTLS,
-			CertFile:    profileConfig.CertFile,
-			KeyFile:     profileConfig.KeyFile,
-		}
-		defaultProfiles = append(defaultProfiles, profile)
-	}
-
-	if err := listenerStorage.LoadDefaultListeners(defaultProfiles); err != nil {
-		log.Printf("⚠️  Warning: Failed to load default listeners: %v", err)
-	}
-
-	// Only start listeners that are explicitly marked as active in the database
-	log.Println("🔒 Starting active C2 listeners from database...")
-
-	activeListeners, err := listenerStorage.GetActiveListeners()
-	if err != nil {
-		log.Printf("⚠️  Warning: Failed to get active listeners: %v", err)
-		activeListeners = []*services.StoredListener{} // Empty slice
-	}
-
-	if len(activeListeners) == 0 {
-		log.Printf("💡 No active listeners found. This may happen if:")
-		log.Printf("   - No default profiles are configured in config.json")
-		log.Printf("   - All listeners failed to start and were marked inactive")
-		log.Printf("   - Database is empty or corrupted")
-	} else {
-		log.Printf("📋 Found %d active listeners", len(activeListeners))
-
-		// Start each active listener
-		startedCount := 0
-		for _, storedListener := range activeListeners {
-			log.Printf("🔄 Starting active listener: %s (%s:%d)", storedListener.Name, storedListener.Host, storedListener.Port)
-
-			// Convert StoredListener to Profile
-			profile := &services.Profile{
-				ID:          storedListener.ID,
-				Name:        storedListener.Name,
-				ProjectName: storedListener.ProjectName,
-				Host:        storedListener.Host,
-				Port:        storedListener.Port,
-				Description: storedListener.Description,
-				UseTLS:      storedListener.UseTLS,
-				CertFile:    storedListener.CertFile,
-				KeyFile:     storedListener.KeyFile,
-			}
-
-			if err := listenerService.StartListener(profile); err != nil {
-				log.Printf("❌ Failed to start listener '%s': %v", storedListener.Name, err)
-				// Mark as inactive in database since it failed to start
-				listenerStorage.UpdateListenerStatus(storedListener.ID, false)
-			} else {
-				log.Printf("✅ Listener '%s' started successfully on %s:%d", storedListener.Name, storedListener.Host, storedListener.Port)
-				if storedListener.UseTLS {
-					log.Printf("🔒 TLS 1.3/1.2 enabled - All C2 communication is encrypted")
-				}
-				startedCount++
-			}
-		}
-
-		log.Printf("✅ Successfully started %d active listener(s)", startedCount)
-	}
-
-	log.Printf("🔒 MuliC2 server is ready. Use the dashboard to manage listeners.")
-
-	// Start background agent status monitoring
-	go monitorAgentStatus(db)
-
-	// Wait for shutdown signal
 	<-sigChan
-	log.Println("Shutting down server...")
 
-	// Stop listener service
+	log.Printf("Shutting down server...")
+
+	// Graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	// Stop all listeners
 	if err := listenerService.StopAllListeners(); err != nil {
 		log.Printf("Error stopping listeners: %v", err)
 	}
 
-	log.Println("Server stopped")
-}
-
-// monitorAgentStatus runs in the background to mark agents as offline if they haven't been seen recently
-func monitorAgentStatus(db *sql.DB) {
-	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// Mark agents as offline if they haven't been seen in the last 2 minutes
-			result, err := db.Exec(`
-				UPDATE agents 
-				SET status = 'offline' 
-				WHERE status = 'online' 
-				AND last_seen < NOW() - INTERVAL '2 minutes'
-			`)
-			if err != nil {
-				log.Printf("Error monitoring agent status: %v", err)
-				continue
-			}
-
-			rowsAffected, _ := result.RowsAffected()
-			if rowsAffected > 0 {
-				log.Printf("🔄 Marked %d agents as offline due to inactivity", rowsAffected)
-			}
-		}
-	}
-}
-
-func connectDB() (*sql.DB, error) {
-	// Load configuration
-	config, err := loadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load configuration: %w", err)
-	}
-
-	// PostgreSQL connection string
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		config.Database.User,
-		config.Database.Password,
-		config.Database.Host,
-		config.Database.Port,
-		config.Database.DBName,
-		config.Database.SSLMode)
-
-	// Open database connection
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Create tables if they don't exist
-	if err := createTables(db); err != nil {
-		return nil, fmt.Errorf("failed to create tables: %w", err)
-	}
-
-	// Initialize default profiles from config
-	if err := initializeProfiles(db, config); err != nil {
-		return nil, fmt.Errorf("failed to initialize profiles: %w", err)
-	}
-
-	// Set connection pool settings
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(25)
-
-	return db, nil
-}
-
-func initializeProfiles(db *sql.DB, config *Config) error {
-	// Check if profiles table has any data
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM profiles").Scan(&count)
-	if err != nil {
-		return fmt.Errorf("failed to check profiles count: %w", err)
-	}
-
-	// If profiles exist, don't initialize
-	if count > 0 {
-		return nil
-	}
-
-	// Insert default profiles from config
-	for _, profile := range config.Profiles {
-		_, err := db.Exec(`
-			INSERT INTO profiles (id, name, project_name, host, port, description, use_tls, cert_file, key_file, poll_interval)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (id) DO NOTHING
-		`, profile.ID, profile.Name, profile.ProjectName, profile.Host, profile.Port, profile.Description, profile.UseTLS, profile.CertFile, profile.KeyFile, 5)
-		if err != nil {
-			log.Printf("Warning: Failed to insert profile %s: %v", profile.ID, err)
-		}
-	}
-
-	log.Printf("✅ Initialized %d default profiles in database", len(config.Profiles))
-	return nil
-}
-
-func createTables(db *sql.DB) error {
-	// Create users table with PostgreSQL syntax
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS users (
-			id SERIAL PRIMARY KEY,
-			username VARCHAR(255) UNIQUE NOT NULL,
-			password_hash VARCHAR(255) NOT NULL,
-			email VARCHAR(255),
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			last_login TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create users table: %w", err)
-	}
-
-	// Create agents table with PostgreSQL syntax
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS agents (
-			id SERIAL PRIMARY KEY,
-			agent_id VARCHAR(255) UNIQUE NOT NULL,
-			hostname VARCHAR(255),
-			ip_address VARCHAR(45),
-			username VARCHAR(255),
-			os_info VARCHAR(255),
-			status VARCHAR(32) DEFAULT 'offline',
-			last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create agents table: %w", err)
-	}
-
-	// Create tasks table with PostgreSQL syntax
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS tasks (
-			id SERIAL PRIMARY KEY,
-			agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-			command TEXT NOT NULL,
-			status VARCHAR(32) DEFAULT 'pending',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			started_at TIMESTAMP,
-			completed_at TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create tasks table: %w", err)
-	}
-
-	// Results table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS results (
-			task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-			output TEXT,
-			completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create results table: %w", err)
-	}
-
-	// Profiles table
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS profiles (
-			id VARCHAR(128) PRIMARY KEY,
-			name VARCHAR(255) NOT NULL,
-			project_name VARCHAR(255),
-			host VARCHAR(64) DEFAULT '0.0.0.0',
-			port INTEGER NOT NULL,
-			description TEXT,
-			use_tls BOOLEAN DEFAULT true,
-			cert_file VARCHAR(512),
-			key_file VARCHAR(512),
-			poll_interval INTEGER DEFAULT 5,
-			is_active BOOLEAN DEFAULT true,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create profiles table: %w", err)
-	}
-
-	// Create user_settings table with PostgreSQL syntax
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS user_settings (
-			id SERIAL PRIMARY KEY,
-			user_id INTEGER NOT NULL,
-			listener_ip VARCHAR(45) DEFAULT '0.0.0.0',
-			listener_port INTEGER DEFAULT 8080,
-			FOREIGN KEY (user_id) REFERENCES users(id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create user_settings table: %w", err)
-	}
-
-	// Create audit_logs table with PostgreSQL syntax
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS audit_logs (
-			id SERIAL PRIMARY KEY,
-			user_id INTEGER NOT NULL,
-			action VARCHAR(100) NOT NULL,
-			details TEXT,
-			ip_address VARCHAR(45),
-			user_agent TEXT,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (user_id) REFERENCES users(id)
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create audit_logs table: %w", err)
-	}
-
-	return nil
-}
-
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Dynamic CORS for SPA with credentials
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		reqHeaders := r.Header.Get("Access-Control-Request-Headers")
-		if reqHeaders == "" {
-			reqHeaders = "Content-Type, Authorization"
-		}
-		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
-
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// withGlobalCORS ensures CORS headers are added for all responses,
-// including preflight and non-matching routes
-func withGlobalCORS(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		reqHeaders := r.Header.Get("Access-Control-Request-Headers")
-		if reqHeaders == "" {
-			reqHeaders = "Content-Type, Authorization"
-		}
-		w.Header().Set("Access-Control-Allow-Headers", reqHeaders)
-
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		h.ServeHTTP(w, r)
-	})
+	log.Printf("Server stopped successfully")
 }
