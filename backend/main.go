@@ -411,6 +411,17 @@ func main() {
 	router.Use(corsMiddleware)
 	api.Use(corsMiddleware)
 
+	// Root endpoint for testing
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Root request received")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "MuliC2 Backend is running!",
+			"status":  "ok",
+		})
+	}).Methods("GET")
+
 	// Register routes under /api
 	authHandler.RegisterRoutes(api)
 	profileHandler.RegisterRoutes(api)
@@ -607,27 +618,40 @@ func main() {
 	log.Printf("Starting HTTP server on port %d", config.Server.APIPort)
 	log.Printf("Router configured with API subrouter")
 
-	// Start server in background goroutine
+	// Start server in background goroutine with better error handling
 	go func() {
 		log.Printf("🔄 HTTP server starting on :%d...", config.Server.APIPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("❌ HTTP server error: %v", err)
+			// If there's a binding error, log it clearly
+			if err.Error() == "bind: address already in use" {
+				log.Printf("❌ Port %d is already in use! Please check if another process is using this port.", config.Server.APIPort)
+			}
 		} else {
 			log.Printf("✅ HTTP server stopped normally")
 		}
 	}()
 
-	// Give the server time to start up
+	// Give the server time to start up and test multiple times
 	log.Printf("⏳ Waiting for server to start up...")
-	time.Sleep(3 * time.Second)
 
-	// Test if server is responding
-	log.Printf("🔄 Testing server response...")
-	if resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/health", config.Server.APIPort)); err == nil {
-		resp.Body.Close()
-		log.Printf("✅ HTTP server is ready and responding")
-	} else {
-		log.Printf("⚠️  HTTP server may not be fully ready: %v", err)
+	// Test server startup with multiple attempts
+	maxAttempts := 10
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		time.Sleep(1 * time.Second)
+
+		log.Printf("🔄 Testing server response (attempt %d/%d)...", attempt, maxAttempts)
+		if resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/health", config.Server.APIPort)); err == nil {
+			resp.Body.Close()
+			log.Printf("✅ HTTP server is ready and responding (attempt %d)", attempt)
+			break
+		} else {
+			log.Printf("⚠️  Attempt %d failed: %v", attempt, err)
+			if attempt == maxAttempts {
+				log.Printf("❌ HTTP server failed to respond after %d attempts", maxAttempts)
+				log.Printf("❌ This may indicate a port conflict or server startup issue")
+			}
+		}
 	}
 
 	// Wait for interrupt signal
