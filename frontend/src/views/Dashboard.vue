@@ -706,7 +706,7 @@ const loadProfiles = async () => {
     console.log('📋 Profiles found:', profiles.length)
     
     // Convert profiles to listeners format for the dashboard
-    listeners.value = profiles.map((profile: any) => ({
+    const mappedListeners = profiles.map((profile: any) => ({
       id: profile.id,
       name: profile.name,
       projectName: profile.projectName,
@@ -719,17 +719,24 @@ const loadProfiles = async () => {
       pollInterval: profile.pollInterval,
       isActive: profile.isActive,
       createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt
+      updatedAt: profile.updatedAt,
+      protocol: profile.useTLS ? 'HTTPS' : 'HTTP',
+      connections: 0 // Default value for connections
     }))
+    
+    console.log('🔄 Setting listeners.value to:', mappedListeners)
+    listeners.value = mappedListeners
     
     // Update stats
     stats.value.activeListeners = listeners.value.filter(l => l.isActive).length
     
     if (listeners.value.length === 0) {
+      console.log('⚠️ No listener profiles found in response')
       ElMessage.warning('No listener profiles found.')
     } else {
       console.log('✅ Loaded listeners:', listeners.value)
       console.log('✅ Active listeners:', stats.value.activeListeners)
+      console.log('✅ Listeners array length:', listeners.value.length)
     }
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -1302,12 +1309,15 @@ onMounted(() => {
   loadProfiles() // Load profiles from our unprotected endpoint
   
   // Listen for profile creation events
-  const handleProfileCreated = () => {
-    console.log('Profile created event detected, reloading profiles...')
+  const handleProfileCreated = (event: any) => {
+    console.log('🎉 Profile created event detected!', event)
+    console.log('Event detail:', event.detail)
+    console.log('Reloading profiles...')
     loadProfiles()
   }
   
   window.addEventListener('profileCreated', handleProfileCreated)
+  console.log('📡 Dashboard registered profileCreated event listener')
   
   // Clean up on unmount
   onUnmounted(() => {
@@ -1321,6 +1331,12 @@ watch(selectedListenerId, (newId: string) => {
     updateVncFormFromListener()
   }
 })
+
+// Watch for listeners array changes
+watch(listeners, (newListeners) => {
+  console.log('👀 Listeners array changed:', newListeners)
+  console.log('👀 Listeners length:', newListeners.length)
+}, { deep: true })
 
 // Update dashboard statistics
 const updateStats = () => {
