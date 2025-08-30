@@ -424,9 +424,9 @@ func main() {
 
 	// Register routes under /api
 	authHandler.RegisterRoutes(api)
-	profileHandler.RegisterRoutes(api)
 
 	// Profile creation endpoint (for frontend auto-creation) - NO AUTH REQUIRED
+	// MUST BE REGISTERED BEFORE profileHandler to override the protected route
 	log.Printf("🔧 Registering /api/profile/create endpoint (no auth required)...")
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Received profile creation request: %s %s", r.Method, r.URL.Path)
@@ -477,6 +477,9 @@ func main() {
 		json.NewEncoder(w).Encode(serviceProfile)
 		log.Printf("✅ Profile created successfully: %s", serviceProfile.ID)
 	}).Methods("POST")
+
+	// Register profile handler routes AFTER our custom route
+	profileHandler.RegisterRoutes(api)
 
 	// Agent routes (REST)
 	api.HandleFunc("/agent/register", agentHandler.Register).Methods("POST")
