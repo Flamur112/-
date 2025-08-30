@@ -607,9 +607,22 @@ func main() {
 		}
 	}()
 
+	// Give the server a moment to start up
+	log.Printf("⏳ Waiting for HTTP server to start up...")
+	time.Sleep(2 * time.Second)
+
+	// Test if server is responding
+	if resp, err := http.Get("http://localhost:8080/api/health"); err == nil {
+		resp.Body.Close()
+		log.Printf("✅ HTTP server is ready and responding")
+	} else {
+		log.Printf("⚠️  HTTP server may not be fully ready: %v", err)
+	}
+
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	log.Printf("🚀 Server is running. Press Ctrl+C to stop.")
 	<-sigChan
 
 	log.Printf("Shutting down server...")
