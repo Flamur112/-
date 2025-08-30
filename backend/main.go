@@ -474,12 +474,83 @@ func main() {
 			log.Printf("✅ Listener started successfully for profile %s", serviceProfile.ID)
 		}
 
+		// Save profile to database as a listener
+		storedListener := &services.StoredListener{
+			ID:          serviceProfile.ID,
+			Name:        serviceProfile.Name,
+			ProjectName: serviceProfile.ProjectName,
+			Host:        serviceProfile.Host,
+			Port:        serviceProfile.Port,
+			Description: serviceProfile.Description,
+			UseTLS:      serviceProfile.UseTLS,
+			CertFile:    serviceProfile.CertFile,
+			KeyFile:     serviceProfile.KeyFile,
+			IsActive:    true,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+
+		if err := listenerStorage.SaveListener(storedListener); err != nil {
+			log.Printf("⚠️  Warning: Could not save profile to database: %v", err)
+			// Don't fail the request - just log the warning and continue
+		} else {
+			log.Printf("✅ Profile saved to database: %s", serviceProfile.ID)
+		}
+
 		// Return the created profile
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(serviceProfile)
 		log.Printf("✅ Profile created successfully: %s", serviceProfile.ID)
 	}).Methods("POST")
+
+	// Profile list endpoint (for frontend dashboard) - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/profile/list endpoint (no auth required)...")
+	api.HandleFunc("/profile/list", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("📥 Received profile list request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "GET" {
+			log.Printf("❌ Method not allowed: %s", r.Method)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Get all listeners from storage
+		listeners, err := listenerStorage.GetAllListeners()
+		if err != nil {
+			log.Printf("❌ Failed to get listeners: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to get profiles: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Convert listeners to profiles format
+		profiles := make([]map[string]interface{}, 0, len(listeners))
+		for _, listener := range listeners {
+			profile := map[string]interface{}{
+				"id":          listener.ID,
+				"name":        listener.Name,
+				"projectName": listener.ProjectName,
+				"host":        listener.Host,
+				"port":        listener.Port,
+				"description": listener.Description,
+				"useTLS":      listener.UseTLS,
+				"certFile":    listener.CertFile,
+				"keyFile":     listener.KeyFile,
+				"isActive":    listener.IsActive,
+				"createdAt":   listener.CreatedAt,
+				"updatedAt":   listener.UpdatedAt,
+			}
+			profiles = append(profiles, profile)
+		}
+
+		// Return the profiles
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"profiles": profiles,
+		})
+		log.Printf("✅ Profile list returned: %d profiles", len(profiles))
+	}).Methods("GET")
 
 	// Register profile handler routes AFTER our custom route
 	profileHandler.RegisterRoutes(api)
