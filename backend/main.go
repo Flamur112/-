@@ -16,7 +16,6 @@ import (
 
 	"mulic2/handlers"
 	"mulic2/services"
-	"mulic2/utils"
 
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -289,7 +288,23 @@ func main() {
 	router := mux.NewRouter()
 
 	// Apply CORS middleware to the main router - THIS IS KEY!
-	router.Use(utils.CORSMiddleware)
+	router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Set CORS headers for ALL requests
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+			// Handle preflight OPTIONS request
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Add logging middleware for debugging
 	router.Use(func(next http.Handler) http.Handler {
@@ -301,27 +316,48 @@ func main() {
 
 	// Root endpoint for testing
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Root request received")
+		log.Printf("Root request received from %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
-			"message": "MuliC2 Backend is running!",
-			"status":  "ok",
+			"message":   "MuliC2 Backend is running!",
+			"status":    "ok",
+			"timestamp": time.Now().Format(time.RFC3339),
 		})
 	}).Methods("GET", "OPTIONS")
+
+	// Test CORS endpoint
+	router.HandleFunc("/test-cors", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("CORS test request received from %s", r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "CORS is working!",
+			"method":  r.Method,
+			"origin":  r.Header.Get("Origin"),
+		})
+	}).Methods("GET", "POST", "OPTIONS")
 
 	// Create API subrouter
 	api := router.PathPrefix("/api").Subrouter()
 
 	// Health check endpoint - FIRST for testing
 	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Health check request received")
+		log.Printf("Health check request received from %s", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 			"service":   "MuliC2 Backend",
+			"endpoints": []string{
+				"/api/profile/list",
+				"/api/profile/create",
+				"/api/agents",
+				"/api/tasks",
+				"/api/vnc/start",
+				"/api/vnc/stop",
+			},
 		})
 	}).Methods("GET", "OPTIONS")
 
@@ -330,7 +366,7 @@ func main() {
 
 	// Profile creation endpoint
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Profile creation request: %s %s", r.Method, r.URL.Path)
+		log.Printf("Profile creation request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -399,7 +435,7 @@ func main() {
 
 	// Profile list endpoint
 	api.HandleFunc("/profile/list", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Profile list request: %s %s", r.Method, r.URL.Path)
+		log.Printf("Profile list request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
 		if r.Method != "GET" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
