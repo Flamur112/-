@@ -93,17 +93,8 @@ func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12, // Minimum TLS 1.2
 		MaxVersion:   tls.VersionTLS13, // Maximum TLS 1.3
-		CipherSuites: []uint16{
-			// TLS 1.3 cipher suites (preferred)
-			tls.TLS_AES_256_GCM_SHA384,
-			tls.TLS_CHACHA20_POLY1305_SHA256,
-			tls.TLS_AES_128_GCM_SHA256,
-			// TLS 1.2 fallback cipher suites
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-		},
-		PreferServerCipherSuites: true,
+		// Remove cipher suite restrictions to be more permissive
+		PreferServerCipherSuites: false, // Let client choose
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
@@ -111,6 +102,8 @@ func (ls *ListenerService) createTLSConfig(profile *Profile) (*tls.Config, error
 		},
 		// Allow client to choose TLS version (1.3 or 1.2)
 		ClientAuth: tls.NoClientCert,
+		// Add session ticket support for better performance
+		SessionTicketsDisabled: false,
 	}
 
 	return tlsConfig, nil
@@ -403,6 +396,20 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 
 	// IMMEDIATELY check if this is a VNC connection (before any other detection)
 	log.Printf("DEBUG: About to detect VNC connection from %s", remoteAddr)
+
+	// Test if connection is still alive
+	if conn == nil {
+		log.Printf("ERROR: Connection is nil!")
+		return
+	}
+
+	// Try to get connection state
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		state := tlsConn.ConnectionState()
+		log.Printf("DEBUG: TLS connection state - HandshakeComplete: %v, Version: %s",
+			state.HandshakeComplete, tlsVersionString(state.Version))
+	}
+
 	vncDetected, bufferedConn := ls.detectVNCConnection(conn)
 	if vncDetected {
 		log.Printf("VNC connection detected from %s, routing to VNC service", remoteAddr)
@@ -537,10 +544,10 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	// Try to peek at least 4 bytes, waiting up to 5 seconds if needed
+	// Try to peek at least 4 bytes, waiting up to 10 seconds if needed
 	var peekBytes []byte
 	var err error
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		peekBytes, err = reader.Peek(8)
 		if err == nil || len(peekBytes) >= 4 {
@@ -551,10 +558,10 @@ func (ls *ListenerService) detectVNCConnection(conn net.Conn) (bool, net.Conn) {
 			return false, conn
 		}
 		if time.Now().After(deadline) {
-			log.Printf("DEBUG: Timeout waiting for VNC data after 5 seconds")
+			log.Printf("DEBUG: Timeout waiting for VNC data after 10 seconds")
 			return false, conn
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	log.Printf("DEBUG: Peeked bytes: %v (hex: %x)", peekBytes, peekBytes)

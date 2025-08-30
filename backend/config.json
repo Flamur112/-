@@ -16,7 +16,7 @@
       "host": "0.0.0.0",
       "port": 23456,
       "description": "Main C2 profile for all agent types",
-      "useTLS": true,
+      "useTLS": false,
       "certFile": "../server.crt",
       "keyFile": "../server.key"
     }

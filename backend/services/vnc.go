@@ -104,6 +104,8 @@ func (vs *VNCService) HandleVNCConnection(conn net.Conn, agentIP string) {
 
 	// Log that we're ready to receive data
 	log.Printf("🔍 VNC service ready to receive data from %s", connectionID)
+
+	// Don't send any test message - PowerShell agent doesn't expect it
 }
 
 // processVNCStream processes the incoming VNC stream with robust error handling
