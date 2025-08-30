@@ -62,16 +62,10 @@ router.beforeEach((to, from, next) => {
   console.log('🔐 Auth status:', isAuthenticated.value)
   console.log('🔐 Route requires auth:', to.meta.requiresAuth)
   
-  // If user is not authenticated and trying to access protected routes, stay on same page
-  // The App.vue will handle showing auth forms vs main app
-  if (to.meta.requiresAuth && !isAuthenticated.value) {
-    console.log('🚫 Access denied - not authenticated')
-    // Stay on current page, App.vue will show auth forms
-    next(false)
-  } else {
-    console.log('✅ Access granted - proceeding to route')
-    next()
-  }
+  // Allow navigation to proceed - let the components handle auth state
+  // The App.vue will handle showing auth forms vs main app based on auth state
+  console.log('✅ Access granted - proceeding to route (auth handled by components)')
+  next()
 })
 
 export default router
