@@ -677,11 +677,15 @@ const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
 
 // Load available profiles
 const loadProfiles = async () => {
+  console.log('🔄 Starting to load profiles...')
   try {
-    const response = await authenticatedFetch('/api/profile/list')
+    console.log('📡 Making request to /api/profile/list...')
+    // Use simple fetch for unprotected endpoint
+    const response = await fetch('/api/profile/list')
     
+    console.log('📥 Response received:', response.status, response.statusText)
     if (!response.ok) {
-      console.error('Profile API not available - server returned:', response.status, response.statusText)
+      console.error('❌ Profile API not available - server returned:', response.status, response.statusText)
       ElMessage.error(`Failed to load profiles: Server returned ${response.status} ${response.statusText}`)
       listeners.value = []
       return
@@ -696,7 +700,9 @@ const loadProfiles = async () => {
     }
     
     const data = await response.json()
+    console.log('📊 Raw response data:', data)
     const profiles = data.profiles || []
+    console.log('📋 Profiles found:', profiles.length)
     
     // Convert profiles to listeners format for the dashboard
     listeners.value = profiles.map((profile: any) => ({

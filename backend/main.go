@@ -394,8 +394,9 @@ func main() {
 		}
 	}
 
-	// Initialize listener storage
+	// Initialize storage services
 	listenerStorage := services.NewListenerStorage(db)
+	profileStorage := services.NewProfileStorage(db)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(db)
@@ -474,8 +475,8 @@ func main() {
 			log.Printf("✅ Listener started successfully for profile %s", serviceProfile.ID)
 		}
 
-		// Save profile to database as a listener
-		storedListener := &services.StoredListener{
+		// Save profile to database
+		storedProfile := &services.StoredProfile{
 			ID:          serviceProfile.ID,
 			Name:        serviceProfile.Name,
 			ProjectName: serviceProfile.ProjectName,
@@ -490,7 +491,7 @@ func main() {
 			UpdatedAt:   time.Now(),
 		}
 
-		if err := listenerStorage.SaveListener(storedListener); err != nil {
+		if err := profileStorage.SaveProfile(storedProfile); err != nil {
 			log.Printf("⚠️  Warning: Could not save profile to database: %v", err)
 			// Don't fail the request - just log the warning and continue
 		} else {
@@ -515,41 +516,41 @@ func main() {
 			return
 		}
 
-		// Get all listeners from storage
-		listeners, err := listenerStorage.GetAllListeners()
+		// Get all profiles from storage
+		profiles, err := profileStorage.GetAllProfiles()
 		if err != nil {
-			log.Printf("❌ Failed to get listeners: %v", err)
+			log.Printf("❌ Failed to get profiles: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to get profiles: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Convert listeners to profiles format
-		profiles := make([]map[string]interface{}, 0, len(listeners))
-		for _, listener := range listeners {
-			profile := map[string]interface{}{
-				"id":          listener.ID,
-				"name":        listener.Name,
-				"projectName": listener.ProjectName,
-				"host":        listener.Host,
-				"port":        listener.Port,
-				"description": listener.Description,
-				"useTLS":      listener.UseTLS,
-				"certFile":    listener.CertFile,
-				"keyFile":     listener.KeyFile,
-				"isActive":    listener.IsActive,
-				"createdAt":   listener.CreatedAt,
-				"updatedAt":   listener.UpdatedAt,
+		// Convert profiles to response format
+		profileData := make([]map[string]interface{}, 0, len(profiles))
+		for _, profile := range profiles {
+			profileInfo := map[string]interface{}{
+				"id":          profile.ID,
+				"name":        profile.Name,
+				"projectName": profile.ProjectName,
+				"host":        profile.Host,
+				"port":        profile.Port,
+				"description": profile.Description,
+				"useTLS":      profile.UseTLS,
+				"certFile":    profile.CertFile,
+				"keyFile":     profile.KeyFile,
+				"isActive":    profile.IsActive,
+				"createdAt":   profile.CreatedAt,
+				"updatedAt":   profile.UpdatedAt,
 			}
-			profiles = append(profiles, profile)
+			profileData = append(profileData, profileInfo)
 		}
 
 		// Return the profiles
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"profiles": profiles,
+			"profiles": profileData,
 		})
-		log.Printf("✅ Profile list returned: %d profiles", len(profiles))
+		log.Printf("✅ Profile list returned: %d profiles", len(profileData))
 	}).Methods("GET")
 
 	// Register profile handler routes AFTER our custom route
