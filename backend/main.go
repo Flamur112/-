@@ -466,14 +466,17 @@ func main() {
 			KeyFile:     profile.KeyFile,
 		}
 
-		// Start the listener
+		// Start the listener (but don't fail if it can't start due to port conflict)
 		if err := listenerService.StartListener(serviceProfile); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
-			return
+			log.Printf("⚠️  Warning: Could not start listener for profile %s: %v", serviceProfile.ID, err)
+			// Don't fail the request - just log the warning and continue
+		} else {
+			log.Printf("✅ Listener started successfully for profile %s", serviceProfile.ID)
 		}
 
 		// Return the created profile
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(serviceProfile)
 		log.Printf("✅ Profile created successfully: %s", serviceProfile.ID)
 	}).Methods("POST")
