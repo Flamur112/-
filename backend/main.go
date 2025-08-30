@@ -379,6 +379,9 @@ func main() {
 		}
 	}
 
+	// Also ensure the default profile from config.json is always started
+	log.Printf("Ensuring default profile is running...")
+
 	// Initialize listener storage
 	listenerStorage := services.NewListenerStorage(db)
 

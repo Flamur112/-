@@ -28,13 +28,62 @@ const checkBackendStatus = async () => {
   }
 }
 
+// Create default C2 profile automatically
+const createDefaultProfile = async () => {
+  try {
+    console.log('Creating default C2 profile...')
+    
+    // Create default profile data
+    const defaultProfile = {
+      name: 'Default C2',
+      projectName: 'MuliC2',
+      host: '0.0.0.0',
+      port: 23456, // Use the port from your config.json
+      description: 'Default C2 profile with TLS enabled',
+      useTLS: true,
+      certFile: '../server.crt',
+      keyFile: '../server.key'
+    }
+    
+    // Save profile to backend
+    const response = await fetch('/api/profile/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...useAuth().getAuthHeader()
+      },
+      body: JSON.stringify(defaultProfile)
+    })
+    
+    if (response.ok) {
+      const profile = await response.json()
+      console.log('Default profile created:', profile)
+      
+      // Set as active profile
+      localStorage.setItem('active_profile_id', profile.id)
+      hasSelectedProfile.value = true
+      
+      console.log('Default profile activated successfully')
+    } else {
+      console.error('Failed to create default profile:', response.statusText)
+    }
+  } catch (error) {
+    console.error('Error creating default profile:', error)
+  }
+}
+
 // Single page logic - show auth forms, profile selection, or main app based on state
 const showAuth = computed(() => !isAuthenticated.value && !backendUnavailable.value)
-const showProfileSelection = computed(() => isAuthenticated.value && !hasSelectedProfile.value && !backendUnavailable.value)
+// Skip profile selection - go straight to dashboard after login
+const showProfileSelection = computed(() => false) // Always false - skip profile selection
 const showRestartMessage = computed(() => backendUnavailable.value)
 
-// Watch for authentication changes and update profile selection
-watch(isAuthenticated, () => {
+// Watch for authentication changes and auto-create default profile
+watch(isAuthenticated, async (newValue) => {
+  if (newValue && !hasSelectedProfile.value) {
+    // User just logged in and has no profile - create default one
+    await createDefaultProfile()
+  }
   updateProfileSelection()
 })
 
