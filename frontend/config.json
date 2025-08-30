@@ -1,7 +1,8 @@
 {
   "backend": {
     "api_port": 8080,
-    "c2_default_port": 50050
+    "c2_default_port": 50050,
+    "host": "localhost"
   },
   "frontend": {
     "port": 5173

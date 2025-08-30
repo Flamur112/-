@@ -673,8 +673,25 @@ interface Profile {
 
 const availableProfiles = ref<Profile[]>([])
 
-// API base URL - use localhost for local development
-const API_BASE_URL = 'http://localhost:8080'
+// API base URL - read from config file, defaults to localhost
+const API_BASE_URL = ref('http://localhost:8080')
+
+// Load configuration on mount
+const loadConfig = async () => {
+  try {
+    const response = await fetch('/config.json')
+    if (response.ok) {
+      const config = await response.json()
+      const host = config.backend?.host || 'localhost'
+      const port = config.backend?.api_port || 8080
+      API_BASE_URL.value = `http://${host}:${port}`
+      console.log('API configuration loaded:', API_BASE_URL.value)
+    }
+  } catch (error) {
+    console.warn('Failed to load config, using default:', error)
+    // Keep default localhost:8080
+  }
+}
 
 // Utility function for authenticated API requests
 const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
@@ -689,7 +706,7 @@ const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
   }
   
   // Prepend API base URL to relative URLs
-  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL.value}${url}`
   
   const response = await fetch(fullUrl, {
     ...options,
@@ -1414,7 +1431,7 @@ const startVNCStream = () => {
   const token = localStorage.getItem('auth_token')
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
-  const eventSource = new EventSource(`${API_BASE_URL}/api/vnc/stream?token=${token}`)
+  const eventSource = new EventSource(`${API_BASE_URL.value}/api/vnc/stream?token=${token}`)
     eventSource.onmessage = (event) => {
     try {
       const frame = JSON.parse(event.data)
@@ -1588,7 +1605,8 @@ const getTaskStatusColor = (status: string) => {
 }
 
 // Initialize dashboard
-onMounted(() => {
+onMounted(async () => {
+  await loadConfig() // Load configuration first
   updateStats()
   loadDashboardData()
   loadProfiles() // Load profiles on mount
@@ -1746,7 +1764,9 @@ const refreshListeners = async () => {
 <style scoped lang="scss">
 .dashboard {
   padding: 20px;
+  background: #000000; /* Fallback for --primary-black */
   background: var(--primary-black);
+  color: #ffffff; /* Fallback for --text-white */
   color: var(--text-white);
   min-height: 100%;
 }
@@ -1755,6 +1775,7 @@ const refreshListeners = async () => {
   margin-bottom: 30px;
   
   .panel-title {
+    color: #ffffff; /* Fallback for --text-white */
     color: var(--text-white);
     margin: 0 0 20px 0;
     font-size: 24px;
@@ -1767,7 +1788,9 @@ const refreshListeners = async () => {
     gap: 20px;
     
     .stat-card {
+      background: #0a0a0a; /* Fallback for --secondary-black */
       background: var(--secondary-black);
+      border: 1px solid #333333; /* Fallback for --border-color */
       border: 1px solid var(--border-color);
       border-radius: 8px;
       padding: 20px;
@@ -1785,11 +1808,13 @@ const refreshListeners = async () => {
         .stat-number {
           font-size: 28px;
           font-weight: bold;
+          color: #ffffff; /* Fallback for --text-white */
           color: var(--text-white);
           margin-bottom: 5px;
         }
 
         .stat-label {
+          color: #cccccc; /* Fallback for --text-gray */
           color: var(--text-gray);
           font-size: 14px;
         }
@@ -1799,6 +1824,7 @@ const refreshListeners = async () => {
 }
 
 .dashboard-tabs {
+  background: #0a0a0a; /* Fallback for --secondary-black */
   background: var(--secondary-black);
   border-radius: 8px;
   padding: 20px;
@@ -1808,9 +1834,11 @@ const refreshListeners = async () => {
   }
   
   :deep(.el-tabs__item) {
+    color: #cccccc; /* Fallback for --text-gray */
     color: var(--text-gray);
     
     &.is-active {
+      color: #ff0000; /* Fallback for --primary-color */
       color: var(--primary-color);
     }
   }
@@ -1823,6 +1851,7 @@ const refreshListeners = async () => {
   margin-bottom: 20px;
   
   h3 {
+    color: #ffffff; /* Fallback for --text-white */
     color: var(--text-white);
     margin: 0;
     font-size: 18px;
@@ -1838,9 +1867,11 @@ const refreshListeners = async () => {
 .placeholder-content {
   text-align: center;
   padding: 60px 20px;
+  color: #cccccc; /* Fallback for --text-gray */
   color: var(--text-gray);
   
   h3 {
+    color: #ffffff; /* Fallback for --text-white */
     color: var(--text-white);
     margin: 20px 0 15px 0;
   }
@@ -1881,6 +1912,7 @@ const refreshListeners = async () => {
 .listeners-panel,
 .agents-panel,
 .overview-panel {
+  color: #ffffff; /* Fallback for --text-white */
   color: var(--text-white);
 }
 
@@ -1897,9 +1929,11 @@ const refreshListeners = async () => {
 .listeners-panel,
 .implants-panel,
 .tasks-panel {
+  background: #0a0a0a; /* Fallback for --secondary-black */
   background: var(--secondary-black);
   border-radius: 8px;
   padding: 20px;
+  border: 1px solid #333333; /* Fallback for --border-color */
   border: 1px solid var(--border-color);
 }
 
@@ -2158,6 +2192,11 @@ const refreshListeners = async () => {
 /* Agents Panel */
 .agents-panel {
   padding: 20px;
+  background: #0a0a0a; /* Fallback for --secondary-black */
+  background: var(--secondary-black);
+  border-radius: 8px;
+  border: 1px solid #333333; /* Fallback for --border-color */
+  border: 1px solid var(--border-color);
 }
 
 .agents-panel .panel-header {
@@ -2239,6 +2278,11 @@ const refreshListeners = async () => {
 /* VNC Panel */
 .vnc-panel {
   padding: 20px;
+  background: #0a0a0a; /* Fallback for --secondary-black */
+  background: var(--secondary-black);
+  border-radius: 8px;
+  border: 1px solid #333333; /* Fallback for --border-color */
+  border: 1px solid var(--border-color);
 }
 
 .vnc-panel .panel-header {
@@ -2256,6 +2300,7 @@ const refreshListeners = async () => {
 }
 
 .vnc-panel .vnc-generator {
+  background: #0a0a0a; /* Fallback for --secondary-black */
   background: var(--secondary-black);
   padding: 20px;
   border-radius: 8px;
@@ -2286,6 +2331,7 @@ const refreshListeners = async () => {
 }
 
 .vnc-panel .vnc-output {
+  background: #0a0a0a; /* Fallback for --secondary-black */
   background: var(--secondary-black);
   padding: 20px;
   border-radius: 8px;
@@ -2332,6 +2378,7 @@ const refreshListeners = async () => {
 .vnc-viewer {
   margin-top: 30px;
   padding: 20px;
+  background: #0a0a0a; /* Fallback for --secondary-black */
   background: var(--secondary-black);
   border-radius: 8px;
 }
