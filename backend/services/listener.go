@@ -463,7 +463,13 @@ func (ls *ListenerService) handleConnection(conn net.Conn, instance *listenerIns
 	}
 
 	// If we reach here, it's a regular C2 connection - close when done
-	defer conn.Close()
+	// NOTE: VNC connections are handled by VNC service and should NOT be closed here
+	defer func() {
+		// Only close if it's NOT a VNC connection
+		if connType != "VNC" {
+			conn.Close()
+		}
+	}()
 
 	// Send welcome message with connection details
 	profileName := "unknown"
