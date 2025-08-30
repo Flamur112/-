@@ -556,6 +556,7 @@ interface Listener {
   useTLS: boolean
   certFile?: string
   keyFile?: string
+  pollInterval?: number
   isActive: boolean
   createdAt: string
   updatedAt: string
@@ -715,6 +716,7 @@ const loadProfiles = async () => {
       useTLS: profile.useTLS,
       certFile: profile.certFile,
       keyFile: profile.keyFile,
+      pollInterval: profile.pollInterval,
       isActive: profile.isActive,
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt

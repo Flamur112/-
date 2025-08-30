@@ -21,15 +21,6 @@
           />
         </el-form-item>
 
-        <el-form-item label="Email" prop="email">
-          <el-input
-            v-model="form.email"
-            placeholder="Enter email"
-            prefix-icon="Message"
-            type="email"
-          />
-        </el-form-item>
-
         <el-form-item label="Password" prop="password">
           <el-input
             v-model="form.password"
@@ -84,7 +75,6 @@ const registerForm = ref()
 
 const form = reactive({
   username: '',
-  email: '',
   password: '',
   confirmPassword: ''
 })
@@ -104,10 +94,6 @@ const rules = {
     { required: true, message: 'Please enter username', trigger: 'blur' },
     { min: 3, max: 20, message: 'Length should be 3 to 20 characters', trigger: 'blur' }
   ],
-  email: [
-    { required: true, message: 'Please enter email', trigger: 'blur' },
-    { type: 'email', message: 'Please enter a valid email', trigger: 'blur' }
-  ],
   password: [
     { required: true, message: 'Please enter password', trigger: 'blur' },
     { min: 6, message: 'Password must be at least 6 characters', trigger: 'blur' }
@@ -124,7 +110,6 @@ const handleRegister = async () => {
 
     const success = await register({
       username: form.username,
-      email: form.email,
       password: form.password
     })
 

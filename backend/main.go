@@ -239,6 +239,23 @@ func createTables(db *sql.DB) error {
 		return fmt.Errorf("failed to create profiles table: %w", err)
 	}
 
+	// Ensure poll_interval column exists (migration for existing databases)
+	_, err = db.Exec(`
+		DO $$ 
+		BEGIN 
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.columns 
+				WHERE table_name = 'profiles' AND column_name = 'poll_interval'
+			) THEN
+				ALTER TABLE profiles ADD COLUMN poll_interval INTEGER DEFAULT 5;
+			END IF;
+		END $$;
+	`)
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not ensure poll_interval column exists: %v", err)
+		// Don't fail - this is just a migration attempt
+	}
+
 	// Create user_settings table
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_settings (
@@ -477,18 +494,19 @@ func main() {
 
 		// Save profile to database
 		storedProfile := &services.StoredProfile{
-			ID:          serviceProfile.ID,
-			Name:        serviceProfile.Name,
-			ProjectName: serviceProfile.ProjectName,
-			Host:        serviceProfile.Host,
-			Port:        serviceProfile.Port,
-			Description: serviceProfile.Description,
-			UseTLS:      serviceProfile.UseTLS,
-			CertFile:    serviceProfile.CertFile,
-			KeyFile:     serviceProfile.KeyFile,
-			IsActive:    true,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:           serviceProfile.ID,
+			Name:         serviceProfile.Name,
+			ProjectName:  serviceProfile.ProjectName,
+			Host:         serviceProfile.Host,
+			Port:         serviceProfile.Port,
+			Description:  serviceProfile.Description,
+			UseTLS:       serviceProfile.UseTLS,
+			CertFile:     serviceProfile.CertFile,
+			KeyFile:      serviceProfile.KeyFile,
+			PollInterval: 5, // Default poll interval
+			IsActive:     true,
+			CreatedAt:    time.Now(),
+			UpdatedAt:    time.Now(),
 		}
 
 		log.Printf("💾 Attempting to save profile to database: %+v", storedProfile)
@@ -531,18 +549,19 @@ func main() {
 		profileData := make([]map[string]interface{}, 0, len(profiles))
 		for _, profile := range profiles {
 			profileInfo := map[string]interface{}{
-				"id":          profile.ID,
-				"name":        profile.Name,
-				"projectName": profile.ProjectName,
-				"host":        profile.Host,
-				"port":        profile.Port,
-				"description": profile.Description,
-				"useTLS":      profile.UseTLS,
-				"certFile":    profile.CertFile,
-				"keyFile":     profile.KeyFile,
-				"isActive":    profile.IsActive,
-				"createdAt":   profile.CreatedAt,
-				"updatedAt":   profile.UpdatedAt,
+				"id":           profile.ID,
+				"name":         profile.Name,
+				"projectName":  profile.ProjectName,
+				"host":         profile.Host,
+				"port":         profile.Port,
+				"description":  profile.Description,
+				"useTLS":       profile.UseTLS,
+				"certFile":     profile.CertFile,
+				"keyFile":      profile.KeyFile,
+				"isActive":     profile.IsActive,
+				"createdAt":    profile.CreatedAt,
+				"updatedAt":    profile.UpdatedAt,
+				"pollInterval": profile.PollInterval,
 			}
 			profileData = append(profileData, profileInfo)
 		}
