@@ -140,8 +140,8 @@ func (vs *VNCService) processVNCStream(vncConn *VNCConnection) {
 			// Continue processing
 		}
 
-		// Read more data from the connection with appropriate timeout
-		vncConn.conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // 5 minute timeout for continuous stream
+		// Read more data from the connection - NO TIMEOUT for continuous VNC streaming
+		// vncConn.conn.SetReadDeadline(time.Now().Add(300 * time.Second)) // REMOVED: Causes connection closure
 		n, err := vncConn.conn.Read(buffer)
 		if err != nil {
 			// Enhanced error logging with error type information

