@@ -641,12 +641,22 @@ func main() {
 		time.Sleep(1 * time.Second)
 
 		log.Printf("🔄 Testing server response (attempt %d/%d)...", attempt, maxAttempts)
+
+		// Test root endpoint first
+		if resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", config.Server.APIPort)); err == nil {
+			resp.Body.Close()
+			log.Printf("✅ Root endpoint working (attempt %d)", attempt)
+		} else {
+			log.Printf("⚠️  Root endpoint failed: %v", err)
+		}
+
+		// Test health endpoint
 		if resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/health", config.Server.APIPort)); err == nil {
 			resp.Body.Close()
 			log.Printf("✅ HTTP server is ready and responding (attempt %d)", attempt)
 			break
 		} else {
-			log.Printf("⚠️  Attempt %d failed: %v", attempt, err)
+			log.Printf("⚠️  Health endpoint failed: %v", err)
 			if attempt == maxAttempts {
 				log.Printf("❌ HTTP server failed to respond after %d attempts", maxAttempts)
 				log.Printf("❌ This may indicate a port conflict or server startup issue")
