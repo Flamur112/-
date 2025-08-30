@@ -823,8 +823,10 @@ func main() {
 	}
 
 	if len(activeListeners) == 0 {
-		log.Printf("💡 No active listeners found. Listeners must be manually started from the dashboard.")
-		log.Printf("💡 Default profiles are loaded but inactive. Use the dashboard to start them.")
+		log.Printf("💡 No active listeners found. This may happen if:")
+		log.Printf("   - No default profiles are configured in config.json")
+		log.Printf("   - All listeners failed to start and were marked inactive")
+		log.Printf("   - Database is empty or corrupted")
 	} else {
 		log.Printf("📋 Found %d active listeners", len(activeListeners))
 

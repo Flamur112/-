@@ -274,7 +274,7 @@ func (ls *ListenerStorage) LoadDefaultListeners(defaultProfiles []Profile) error
 			UseTLS:      profile.UseTLS,
 			CertFile:    profile.CertFile,
 			KeyFile:     profile.KeyFile,
-			IsActive:    false, // Default to inactive
+			IsActive:    true, // Default to active for auto-start
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
@@ -282,7 +282,7 @@ func (ls *ListenerStorage) LoadDefaultListeners(defaultProfiles []Profile) error
 		if err := ls.SaveListener(storedListener); err != nil {
 			log.Printf("⚠️  Failed to save default listener '%s': %v", profile.Name, err)
 		} else {
-			log.Printf("💾 Default listener '%s' loaded into database", profile.Name)
+			log.Printf("💾 Default listener '%s' loaded into database (active)", profile.Name)
 		}
 	}
 
