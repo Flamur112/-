@@ -426,8 +426,8 @@ func main() {
 	authHandler.RegisterRoutes(api)
 	profileHandler.RegisterRoutes(api)
 
-	// Profile creation endpoint (for frontend auto-creation)
-	log.Printf("🔧 Registering /api/profile/create endpoint...")
+	// Profile creation endpoint (for frontend auto-creation) - NO AUTH REQUIRED
+	log.Printf("🔧 Registering /api/profile/create endpoint (no auth required)...")
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("📥 Received profile creation request: %s %s", r.Method, r.URL.Path)
 
