@@ -657,9 +657,8 @@ interface Profile {
 
 const availableProfiles = ref<Profile[]>([])
 
-// API base URL - change this to your Linux VM's IP and port
-// If your backend is running on a different IP/port, update this value
-const API_BASE_URL = 'http://192.168.0.111:8080'
+// API base URL - use relative URLs to work with Vite proxy
+const API_BASE_URL = ''
 
 // Utility function for authenticated API requests
 const authenticatedFetch = async (url: string, options: RequestInit = {}) => {

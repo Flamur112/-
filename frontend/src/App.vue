@@ -55,6 +55,9 @@ const createDefaultProfile = async () => {
       body: JSON.stringify(defaultProfile)
     })
     
+    console.log('Response status:', response.status)
+    console.log('Response ok:', response.ok)
+    
     if (response.ok) {
       const profile = await response.json()
       console.log('Default profile created:', profile)
@@ -65,7 +68,9 @@ const createDefaultProfile = async () => {
       
       console.log('Default profile activated successfully')
     } else {
-      console.error('Failed to create default profile:', response.statusText)
+      const errorText = await response.text()
+      console.error('Failed to create default profile:', response.status, response.statusText)
+      console.error('Error response:', errorText)
     }
   } catch (error) {
     console.error('Error creating default profile:', error)
