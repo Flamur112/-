@@ -14,18 +14,18 @@ type ProfileStorage struct {
 
 // StoredProfile represents a C2 profile configuration stored in the database
 type StoredProfile struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	ProjectName string    `json:"projectName"`
-	Host        string    `json:"host"`
-	Port        int       `json:"port"`
-	Description string    `json:"description"`
-	UseTLS      bool      `json:"useTLS"`
-	CertFile    string    `json:"certFile"`
-	KeyFile     string    `json:"keyFile"`
-	IsActive    bool      `json:"isActive"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string    `json:"id" db:"id"`
+	Name        string    `json:"name" db:"name"`
+	ProjectName string    `json:"projectName" db:"project_name"`
+	Host        string    `json:"host" db:"host"`
+	Port        int       `json:"port" db:"port"`
+	Description string    `json:"description" db:"description"`
+	UseTLS      bool      `json:"useTLS" db:"use_tls"`
+	CertFile    string    `json:"certFile" db:"cert_file"`
+	KeyFile     string    `json:"keyFile" db:"key_file"`
+	IsActive    bool      `json:"isActive" db:"is_active"`
+	CreatedAt   time.Time `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
 }
 
 // NewProfileStorage creates a new profile storage service

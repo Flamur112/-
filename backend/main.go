@@ -491,8 +491,9 @@ func main() {
 			UpdatedAt:   time.Now(),
 		}
 
+		log.Printf("💾 Attempting to save profile to database: %+v", storedProfile)
 		if err := profileStorage.SaveProfile(storedProfile); err != nil {
-			log.Printf("⚠️  Warning: Could not save profile to database: %v", err)
+			log.Printf("❌ Failed to save profile to database: %v", err)
 			// Don't fail the request - just log the warning and continue
 		} else {
 			log.Printf("✅ Profile saved to database: %s", serviceProfile.ID)
@@ -517,12 +518,14 @@ func main() {
 		}
 
 		// Get all profiles from storage
+		log.Printf("🔍 Attempting to retrieve profiles from database...")
 		profiles, err := profileStorage.GetAllProfiles()
 		if err != nil {
 			log.Printf("❌ Failed to get profiles: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to get profiles: %v", err), http.StatusInternalServerError)
 			return
 		}
+		log.Printf("📊 Retrieved %d profiles from database", len(profiles))
 
 		// Convert profiles to response format
 		profileData := make([]map[string]interface{}, 0, len(profiles))
