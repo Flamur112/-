@@ -382,6 +382,28 @@ func main() {
 	// Also ensure the default profile from config.json is always started
 	log.Printf("Ensuring default profile is running...")
 
+	// Create default profile if none exists
+	if len(config.Profiles) == 0 {
+		log.Printf("No profiles found in config.json, creating default profile...")
+		defaultProfile := &services.Profile{
+			ID:          "default",
+			Name:        "Default C2",
+			ProjectName: "MuliC2",
+			Host:        "0.0.0.0",
+			Port:        23456,
+			Description: "Default C2 profile with TLS enabled",
+			UseTLS:      true,
+			CertFile:    "../server.crt",
+			KeyFile:     "../server.key",
+		}
+
+		if err := listenerService.StartListener(defaultProfile); err != nil {
+			log.Printf("❌ Failed to start default listener: %v", err)
+		} else {
+			log.Printf("✅ Default profile started successfully")
+		}
+	}
+
 	// Initialize listener storage
 	listenerStorage := services.NewListenerStorage(db)
 
@@ -419,9 +441,9 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "healthy",
+			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
-			"service": "MuliC2 Backend",
+			"service":   "MuliC2 Backend",
 		})
 	}).Methods("GET")
 
