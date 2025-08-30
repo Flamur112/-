@@ -414,6 +414,17 @@ func main() {
 	api.Handle("/tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.EnqueueTask))).Methods("POST")
 	api.Handle("/agent-tasks", utils.AuthMiddleware(http.HandlerFunc(operatorHandler.GetAgentTasks))).Methods("GET")
 
+	// Health check endpoint
+	api.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "healthy",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"service": "MuliC2 Backend",
+		})
+	}).Methods("GET")
+
 	// Agent template download endpoint (protected)
 	api.Handle("/agent/template", utils.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
