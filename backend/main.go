@@ -572,6 +572,9 @@ func main() {
 			ticker := time.NewTicker(200 * time.Millisecond) // 5 FPS
 			defer ticker.Stop()
 
+			frameCount := 0
+			log.Printf("VNC stream goroutine started - waiting for frames from VNC service")
+
 			for {
 				select {
 				case vncFrame := <-listenerService.GetVNCService().GetFrameChannel():
@@ -600,6 +603,10 @@ func main() {
 					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes)", vncFrame.ConnectionID, vncFrame.Size)
 				case <-ticker.C:
 					// Heartbeat to keep connection alive when no frames
+					frameCount++
+					if frameCount%25 == 0 { // Log every 5 seconds
+						log.Printf("VNC stream heartbeat - waiting for frames (count: %d)", frameCount)
+					}
 					continue
 
 				case <-r.Context().Done():
@@ -612,6 +619,35 @@ func main() {
 		// Keep connection alive
 		<-r.Context().Done()
 		log.Printf("VNC stream connection closed")
+	}).Methods("GET", "OPTIONS")
+
+	// VNC debug endpoint - check if frames are being received
+	api.HandleFunc("/vnc/debug", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC DEBUG request: %s %s", r.Method, r.URL.Path)
+
+		vncService := listenerService.GetVNCService()
+		if vncService == nil {
+			log.Printf("VNC service is nil!")
+			http.Error(w, "VNC service not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		// Get VNC service stats
+		connections := vncService.GetActiveConnections()
+		frameChannelLen := len(vncService.GetFrameChannel())
+
+		debugInfo := map[string]interface{}{
+			"vnc_service_initialized": vncService != nil,
+			"active_connections":      len(connections),
+			"frame_channel_length":    frameChannelLen,
+			"connections":             connections,
+		}
+
+		log.Printf("VNC Debug Info: %+v", debugInfo)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(debugInfo)
 	}).Methods("GET", "OPTIONS")
 
 	// VNC monitor switch endpoint
