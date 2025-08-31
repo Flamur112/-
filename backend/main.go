@@ -341,7 +341,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "working"})
-	})
+	}).Methods("GET", "OPTIONS")
 
 	// THE ACTUAL WORKING PROFILE ENDPOINT
 	api.HandleFunc("/profile/list", func(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +364,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(workingData)
-	})
+	}).Methods("GET", "OPTIONS")
 
 	// SIMPLE PROFILE CREATE ENDPOINT
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
@@ -374,7 +374,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"message": "profile created"})
-	})
+	}).Methods("POST", "OPTIONS")
 
 	// Profile delete endpoint
 	api.HandleFunc("/profile/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
