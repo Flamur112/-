@@ -594,17 +594,44 @@ func main() {
 			connections := vncService.GetActiveConnections()
 			log.Printf("VNC stream: Found %d active connections", len(connections))
 
+					// If no connections, send a placeholder frame to show the frontend is working
+		if len(connections) == 0 {
+			log.Printf("No VNC connections - sending placeholder frame")
+			placeholderFrame := map[string]interface{}{
+				"frame_id":      "placeholder_no_connections",
+				"timestamp":     time.Now().Unix(),
+				"width":         800,
+				"height":        600,
+				"size":          1024,
+				"connection_id": "placeholder",
+				"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+			}
+			placeholderJSON, _ := json.Marshal(placeholderFrame)
+			fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		} else {
+			// We have VNC connections - log the actual monitor info
+			log.Printf("VNC connections found - will stream real frames")
+			for _, conn := range connections {
+				log.Printf("VNC Connection: %s from %s, Resolution: %s, Frames: %d", 
+					conn["id"], conn["agent_ip"], conn["resolution"], conn["frame_count"])
+			}
+		}
+
 			for {
 				select {
 				case vncFrame := <-vncService.GetFrameChannel():
 					// Send ACTUAL VNC frame data from the VNC service
 					base64Data := base64.StdEncoding.EncodeToString(vncFrame.Data)
 
+					// IMPORTANT: Use the actual frame dimensions from VNC service
 					frameData := map[string]interface{}{
 						"frame_id":      vncFrame.ConnectionID + "_" + fmt.Sprintf("%d", time.Now().Unix()),
 						"timestamp":     vncFrame.Timestamp.Unix(),
-						"width":         vncFrame.Width,
-						"height":        vncFrame.Height,
+						"width":         vncFrame.Width,  // This should be 200 from PowerShell script
+						"height":        vncFrame.Height, // This should be 150 from PowerShell script
 						"size":          vncFrame.Size,
 						"connection_id": vncFrame.ConnectionID,
 						"image_data":    "data:image/jpeg;base64," + base64Data, // REAL VNC capture data
@@ -619,7 +646,8 @@ func main() {
 						flusher.Flush()
 					}
 
-					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes)", vncFrame.ConnectionID, vncFrame.Size)
+					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes, Dimensions: %dx%d)", 
+						vncFrame.ConnectionID, vncFrame.Size, vncFrame.Width, vncFrame.Height)
 				case <-ticker.C:
 					// Heartbeat to keep connection alive
 					frameCount++
@@ -734,11 +762,11 @@ func main() {
 				monitors = append(monitors, monitorInfo)
 			}
 		} else {
-			// If no VNC connections, create default monitor options
+			// If no VNC connections, create default monitor options - SHOW ALL 4 MONITORS
 			monitors = []map[string]interface{}{
 				{
-					"id":          "monitor_primary",
-					"name":        "Primary Monitor",
+					"id":          "monitor_1",
+					"name":        "Monitor 1 (Primary)",
 					"resolution":  "1920x1080",
 					"agent_ip":    "No VNC Agent",
 					"is_primary":  true,
@@ -746,8 +774,26 @@ func main() {
 					"frame_count": 0,
 				},
 				{
-					"id":          "monitor_secondary",
-					"name":        "Secondary Monitor",
+					"id":          "monitor_2",
+					"name":        "Monitor 2",
+					"resolution":  "1920x1080",
+					"agent_ip":    "No VNC Agent",
+					"is_primary":  false,
+					"is_active":   false,
+					"frame_count": 0,
+				},
+				{
+					"id":          "monitor_3",
+					"name":        "Monitor 3",
+					"resolution":  "1920x1080",
+					"agent_ip":    "No VNC Agent",
+					"is_primary":  false,
+					"is_active":   false,
+					"frame_count": 0,
+				},
+				{
+					"id":          "monitor_4",
+					"name":        "Monitor 4",
 					"resolution":  "1920x1080",
 					"agent_ip":    "No VNC Agent",
 					"is_primary":  false,

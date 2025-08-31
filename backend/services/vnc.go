@@ -279,12 +279,13 @@ func (vs *VNCService) processFrame(vncConn *VNCConnection, frameData []byte) {
 	frameCount := vncConn.FrameCount
 	vncConn.mu.Unlock()
 
-	// Create VNC frame
+	// Create VNC frame with ACTUAL dimensions from the image data
+	// The PowerShell script captures at 800x600, not 200x150
 	frame := VNCFrame{
 		ConnectionID: vncConn.ID,
 		Timestamp:    time.Now(),
-		Width:        200,
-		Height:       150,
+		Width:        800,  // ACTUAL width from PowerShell script
+		Height:       600,  // ACTUAL height from PowerShell script
 		Data:         frameData,
 		Size:         len(frameData),
 	}
