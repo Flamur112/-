@@ -67,6 +67,9 @@ var (
 	// Global profiles storage - ACTUAL WORKING STORAGE
 	profilesStorage = make(map[string]map[string]interface{})
 	profilesMutex   sync.RWMutex
+
+	// Profile persistence file
+	profilesFile = "profiles.json"
 )
 
 // VNCConnection represents a VNC connection
@@ -93,6 +96,44 @@ func getStringFromMap(data map[string]interface{}, key string, defaultValue stri
 func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil
+}
+
+// Save profiles to file
+func saveProfilesToFile() error {
+	profilesMutex.RLock()
+	data, err := json.MarshalIndent(profilesStorage, "", "  ")
+	profilesMutex.RUnlock()
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal profiles: %v", err)
+	}
+
+	return os.WriteFile(profilesFile, data, 0644)
+}
+
+// Load profiles from file
+func loadProfilesFromFile() error {
+	if !fileExists(profilesFile) {
+		log.Printf("No profiles file found, starting with empty storage")
+		return nil
+	}
+
+	data, err := os.ReadFile(profilesFile)
+	if err != nil {
+		return fmt.Errorf("failed to read profiles file: %v", err)
+	}
+
+	var loadedProfiles map[string]map[string]interface{}
+	if err := json.Unmarshal(data, &loadedProfiles); err != nil {
+		return fmt.Errorf("failed to unmarshal profiles: %v", err)
+	}
+
+	profilesMutex.Lock()
+	profilesStorage = loadedProfiles
+	profilesMutex.Unlock()
+
+	log.Printf("Loaded %d profiles from file", len(loadedProfiles))
+	return nil
 }
 
 func getIntFromMap(data map[string]interface{}, key string, defaultValue int) int {
@@ -299,6 +340,13 @@ func main() {
 	}
 
 	log.Printf("Configuration loaded successfully")
+
+	// Load existing profiles from file
+	if err := loadProfilesFromFile(); err != nil {
+		log.Printf("Warning: Failed to load profiles from file: %v", err)
+	} else {
+		log.Printf("Successfully loaded profiles from file")
+	}
 	log.Printf("Server config: API Port=%d, C2 Default Port=%d, TLS Enabled=%v",
 		config.Server.APIPort, config.Server.C2DefaultPort, config.Server.TLSEnabled)
 
@@ -474,7 +522,7 @@ func main() {
 		})
 	}).Methods("GET", "OPTIONS")
 
-	// Profile delete endpoint - FIXED PATH STRUCTURE
+	// Profile delete endpoint - ACTUALLY DELETE FROM STORAGE
 	api.HandleFunc("/profile/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Profile delete request: %s %s", r.Method, r.URL.Path)
 
@@ -490,7 +538,23 @@ func main() {
 			return
 		}
 
-		// HARDCODED SUCCESS FOR NOW - NO MORE DATABASE ERRORS
+		// ACTUALLY DELETE THE PROFILE FROM STORAGE
+		profilesMutex.Lock()
+		if _, exists := profilesStorage[profileID]; exists {
+			delete(profilesStorage, profileID)
+			log.Printf("Profile deleted from storage: %s", profileID)
+		} else {
+			log.Printf("Profile not found in storage: %s", profileID)
+		}
+		profilesMutex.Unlock()
+
+		// Save profiles to file for persistence
+		if err := saveProfilesToFile(); err != nil {
+			log.Printf("Warning: Failed to save profiles to file: %v", err)
+		} else {
+			log.Printf("Profiles saved to file after delete")
+		}
+
 		log.Printf("Profile delete successful for ID: %s", profileID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -602,23 +666,29 @@ func main() {
 			connections := vncService.GetActiveConnections()
 			log.Printf("VNC stream: Found %d active connections", len(connections))
 
-			// If no connections, send a proper 800x600 placeholder frame
+			// If no connections, send a proper 800x600 placeholder frame CONTINUOUSLY
 			if len(connections) == 0 {
-				log.Printf("No VNC connections - sending proper 800x600 placeholder frame")
+				log.Printf("No VNC connections - sending proper 800x600 placeholder frame CONTINUOUSLY")
 
-				// Create a proper 800x600 colored rectangle as placeholder
-				// This will show the full canvas size, not just top-left corner
+				// Create a REAL 800x600 placeholder image using a data URL
+				// This will show the FULL canvas, not just top-left corner
+				width, height := 800, 600
+
+				// Create a simple SVG rectangle that will fill the entire 800x600 canvas
+				svgData := fmt.Sprintf(`<svg width="%d" height="%d" xmlns="http://www.w3.org/2000/svg"><rect width="%d" height="%d" fill="rgb(25,25,112)"/></svg>`, width, height, width, height)
+				base64SVG := base64.StdEncoding.EncodeToString([]byte(svgData))
+
 				placeholderFrame := map[string]interface{}{
 					"frame_id":      "placeholder_no_connections",
 					"timestamp":     time.Now().Unix(),
-					"width":         800,
-					"height":        600,
-					"size":          1024,
+					"width":         width,
+					"height":        height,
+					"size":          len(svgData),
 					"connection_id": "placeholder",
-					"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+					"image_data":    "data:image/svg+xml;base64," + base64SVG,
 				}
 
-				// Send placeholder frame
+				// Send placeholder frame CONTINUOUSLY every 100ms
 				placeholderJSON, _ := json.Marshal(placeholderFrame)
 				fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
 				if flusher, ok := w.(http.Flusher); ok {
@@ -626,6 +696,26 @@ func main() {
 				}
 
 				log.Printf("Sent 800x600 placeholder frame - frontend should show FULL canvas")
+
+				// CONTINUE SENDING PLACEHOLDER FRAMES EVERY 100MS
+				placeholderTicker := time.NewTicker(100 * time.Millisecond)
+				defer placeholderTicker.Stop()
+
+				for {
+					select {
+					case <-placeholderTicker.C:
+						// Update timestamp and send placeholder frame again
+						placeholderFrame["timestamp"] = time.Now().Unix()
+						placeholderJSON, _ := json.Marshal(placeholderFrame)
+						fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
+						if flusher, ok := w.(http.Flusher); ok {
+							flusher.Flush()
+						}
+					case <-r.Context().Done():
+						log.Printf("VNC stream client disconnected")
+						return
+					}
+				}
 			} else {
 				// We have VNC connections - log the actual monitor info
 				log.Printf("VNC connections found - will stream real frames")
@@ -974,6 +1064,13 @@ func main() {
 		}
 		profilesMutex.Unlock()
 
+		// Save profiles to file for persistence
+		if err := saveProfilesToFile(); err != nil {
+			log.Printf("Warning: Failed to save profiles to file: %v", err)
+		} else {
+			log.Printf("Profiles saved to file after start")
+		}
+
 		log.Printf("Successfully started C2 listener on %s:%d", host, port)
 
 		// Return success with profile status
@@ -1022,6 +1119,13 @@ func main() {
 		}
 		profilesMutex.Unlock()
 
+		// Save profiles to file for persistence
+		if err := saveProfilesToFile(); err != nil {
+			log.Printf("Warning: Failed to save profiles to file: %v", err)
+		} else {
+			log.Printf("Profiles saved to file after stop")
+		}
+
 		// Return success with profile status
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -1067,6 +1171,13 @@ func main() {
 		profilesMutex.Lock()
 		profilesStorage[profileID] = createdProfile
 		profilesMutex.Unlock()
+
+		// Save profiles to file for persistence
+		if err := saveProfilesToFile(); err != nil {
+			log.Printf("Warning: Failed to save profiles to file: %v", err)
+		} else {
+			log.Printf("Profiles saved to file successfully")
+		}
 
 		log.Printf("Profile created and STORED with ID: %s", profileID)
 		w.Header().Set("Content-Type", "application/json")
@@ -1148,6 +1259,23 @@ func main() {
 	}
 
 	log.Printf("Starting HTTP server on port %d", config.Server.APIPort)
+
+	// Set up graceful shutdown
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+
+		log.Printf("Shutdown signal received, saving profiles...")
+		if err := saveProfilesToFile(); err != nil {
+			log.Printf("Error saving profiles on shutdown: %v", err)
+		} else {
+			log.Printf("Profiles saved successfully on shutdown")
+		}
+
+		log.Printf("Shutting down server...")
+		os.Exit(0)
+	}()
 	log.Printf("Server will be accessible at:")
 	log.Printf("  - http://localhost:%d", config.Server.APIPort)
 	log.Printf("  - http://192.168.0.111:%d", config.Server.APIPort)
