@@ -420,7 +420,7 @@
                   <span>Frame: {{ vncFrameCount }}</span>
                 </div>
               </div>
-    </div>
+            </div>
 
             <div v-if="!vncConnected" class="vnc-waiting">
               <el-empty description="Waiting for VNC Agent Connection">
@@ -899,9 +899,9 @@ const createListener = async () => {
     const response = await authenticatedFetch('/api/profile/create', {
       method: 'POST',
       body: JSON.stringify({
-        name: listenerForm.value.name,
+      name: listenerForm.value.name,
         projectName: 'MuliC2',
-        host: listenerForm.value.host,
+      host: listenerForm.value.host,
         port: parseInt(listenerForm.value.port),
         description: listenerForm.value.description,
         useTLS: listenerForm.value.protocol === 'https',
@@ -1432,7 +1432,7 @@ const startVNCStream = () => {
   
   // Create EventSource with token in URL (EventSource doesn't support custom headers)
   const eventSource = new EventSource(`${API_BASE_URL.value}/api/vnc/stream?token=${token}`)
-    eventSource.onmessage = (event) => {
+  eventSource.onmessage = (event) => {
     try {
       const frame = JSON.parse(event.data)
       processVNCFrame(frame)
@@ -1462,23 +1462,23 @@ const processVNCFrame = (frame: any) => {
   // Render frame to canvas
   if (vncCanvas.value && frame.image_data) {
     try {
-      const canvas = vncCanvas.value
-      const ctx = canvas.getContext('2d')
-      
-      if (ctx) {
+        const canvas = vncCanvas.value
+        const ctx = canvas.getContext('2d')
+        
+        if (ctx) {
         // Create image from base64 data
-        const img = new Image()
-        img.onload = () => {
+          const img = new Image()
+          img.onload = () => {
           // Clear canvas and draw new frame
-          ctx.clearRect(0, 0, canvas.width, canvas.height)
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         }
         
         // Handle both base64 with and without data URL prefix
         const imageData = frame.image_data.startsWith('data:') 
           ? frame.image_data 
           : `data:image/jpeg;base64,${frame.image_data}`
-        img.src = imageData
+          img.src = imageData
       }
     } catch (error) {
       console.error('Error rendering VNC frame:', error)
