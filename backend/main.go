@@ -400,6 +400,25 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"message": "profile created"})
 	}).Methods("POST", "OPTIONS")
 
+	// ADD MISSING AGENTS AND TASKS ENDPOINTS
+	api.HandleFunc("/agents", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("AGENTS ENDPOINT CALLED")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"agents": []interface{}{},
+		})
+	}).Methods("GET", "OPTIONS")
+
+	api.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("TASKS ENDPOINT CALLED")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"tasks": []interface{}{},
+		})
+	}).Methods("GET", "OPTIONS")
+
 	// Profile delete endpoint
 	api.HandleFunc("/profile/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Profile delete request: %s %s", r.Method, r.URL.Path)
@@ -502,6 +521,34 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{
 			"message": "User registered successfully",
+		})
+	}).Methods("POST", "OPTIONS")
+
+	// ADD MISSING PROFILE ENDPOINTS
+	api.HandleFunc("/profile/start", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("PROFILE START CALLED")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Profile started successfully",
+		})
+	}).Methods("POST", "OPTIONS")
+
+	api.HandleFunc("/profile/stop", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("PROFILE STOP CALLED")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Profile stopped successfully",
+		})
+	}).Methods("POST", "OPTIONS")
+
+	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("PROFILE CREATE CALLED")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Profile created successfully",
 		})
 	}).Methods("POST", "OPTIONS")
 
