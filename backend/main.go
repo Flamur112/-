@@ -60,6 +60,10 @@ type Config struct {
 var (
 	activeVNCConnections = make(map[string]*VNCConnection)
 	vncMutex             sync.RWMutex
+
+	// Global profiles storage - ACTUAL WORKING STORAGE
+	profilesStorage = make(map[string]map[string]interface{})
+	profilesMutex   sync.RWMutex
 )
 
 // VNCConnection represents a VNC connection
@@ -632,6 +636,16 @@ func main() {
 		}
 
 		log.Printf("Stopping profile: %s", profileID)
+
+		// UPDATE THE STORED PROFILE STATUS
+		profilesMutex.Lock()
+		if storedProfile, exists := profilesStorage[profileID]; exists {
+			storedProfile["isActive"] = false
+			storedProfile["stoppedAt"] = time.Now().Format(time.RFC3339)
+			storedProfile["status"] = "stopped"
+			profilesStorage[profileID] = storedProfile
+		}
+		profilesMutex.Unlock()
 
 		// Return success with profile status
 		w.Header().Set("Content-Type", "application/json")
