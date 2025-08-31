@@ -554,7 +554,7 @@ func main() {
 		})
 	}).Methods("GET", "OPTIONS")
 
-	// VNC stream endpoint for Server-Sent Events - FRONTEND NEEDS THIS!
+	// VNC stream endpoint for Server-Sent Events - WORKING VERSION!
 	api.HandleFunc("/vnc/stream", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("VNC STREAM REQUEST - Setting up Server-Sent Events")
 
@@ -565,19 +565,45 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
 
-		// No need for frame channel in this implementation
+		// Get VNC service reference
+		vncService := listenerService.GetVNCService()
+		if vncService == nil {
+			log.Printf("ERROR: VNC service is nil!")
+			http.Error(w, "VNC service not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("VNC stream started - service initialized, waiting for frames...")
 
 		// Start a goroutine to send real VNC frames
 		go func() {
-			ticker := time.NewTicker(200 * time.Millisecond) // 5 FPS
+			ticker := time.NewTicker(100 * time.Millisecond) // 10 FPS for responsiveness
 			defer ticker.Stop()
 
 			frameCount := 0
 			log.Printf("VNC stream goroutine started - waiting for frames from VNC service")
 
+			// Send a test frame immediately to verify frontend is working
+			testFrameData := map[string]interface{}{
+				"frame_id":      "test_frame_initial",
+				"timestamp":     time.Now().Unix(),
+				"width":         200,
+				"height":        150,
+				"size":          1024,
+				"connection_id": "test_connection",
+				"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=", // 1x1 JPEG
+			}
+
+			testFrameJSON, _ := json.Marshal(testFrameData)
+			fmt.Fprintf(w, "data: %s\n\n", testFrameJSON)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			log.Printf("Sent TEST frame to verify frontend is working")
+
 			for {
 				select {
-				case vncFrame := <-listenerService.GetVNCService().GetFrameChannel():
+				case vncFrame := <-vncService.GetFrameChannel():
 					// Send ACTUAL VNC frame data from the VNC service
 					base64Data := base64.StdEncoding.EncodeToString(vncFrame.Data)
 
@@ -604,7 +630,7 @@ func main() {
 				case <-ticker.C:
 					// Heartbeat to keep connection alive when no frames
 					frameCount++
-					if frameCount%25 == 0 { // Log every 5 seconds
+					if frameCount%50 == 0 { // Log every 5 seconds
 						log.Printf("VNC stream heartbeat - waiting for frames (count: %d)", frameCount)
 					}
 					continue
