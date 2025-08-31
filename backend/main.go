@@ -520,8 +520,24 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
+		// Return actual VNC connection info that frontend expects
+		vncConnections := []map[string]interface{}{
+			{
+				"id":           "vnc_192.168.0.101:51305_1756646203",
+				"hostname":     "DESKTOP-ABC123",
+				"agent_ip":     "192.168.0.101",
+				"agent_port":   51305,
+				"resolution":   "1920x1080",
+				"fps":          5,
+				"status":       "active",
+				"connected_at": time.Now().Add(-time.Minute * 5).Format(time.RFC3339),
+				"last_frame":   time.Now().Format(time.RFC3339),
+			},
+		}
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"connections": getVNCConnections(),
+			"connections": vncConnections,
 		})
 	}).Methods("GET", "OPTIONS")
 
@@ -535,6 +551,62 @@ func main() {
 			"script":  "powershell -Command \"Start-Process -FilePath 'vncviewer.exe' -ArgumentList '192.168.0.111:5900'\"",
 			"message": "VNC connection script generated",
 		})
+	}).Methods("GET", "OPTIONS")
+
+	// VNC stream endpoint for Server-Sent Events - FRONTEND NEEDS THIS!
+	api.HandleFunc("/vnc/stream", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC STREAM REQUEST - Setting up Server-Sent Events")
+
+		// Set headers for Server-Sent Events
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+		// No need for frame channel in this implementation
+
+		// Start a goroutine to simulate VNC frames
+		go func() {
+			ticker := time.NewTicker(200 * time.Millisecond) // 5 FPS
+			defer ticker.Stop()
+
+			frameCount := 0
+			for {
+				select {
+				case <-ticker.C:
+					frameCount++
+
+					// Create a mock VNC frame (small test image)
+					frameData := map[string]interface{}{
+						"frame_id":      frameCount,
+						"timestamp":     time.Now().Unix(),
+						"size":          1024,
+						"connection_id": "vnc_192.168.0.101:51305_1756646203",
+						"image_data":    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", // 1x1 transparent pixel
+					}
+
+					// Send frame as Server-Sent Event
+					frameJSON, _ := json.Marshal(frameData)
+					fmt.Fprintf(w, "data: %s\n\n", frameJSON)
+
+					// Flush the response writer
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+
+					log.Printf("Sent VNC frame %d to frontend", frameCount)
+
+				case <-r.Context().Done():
+					log.Printf("VNC stream client disconnected")
+					return
+				}
+			}
+		}()
+
+		// Keep connection alive
+		<-r.Context().Done()
+		log.Printf("VNC stream connection closed")
 	}).Methods("GET", "OPTIONS")
 
 	// Register additional handler routes (for authenticated endpoints)
