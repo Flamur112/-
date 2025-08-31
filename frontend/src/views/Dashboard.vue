@@ -693,35 +693,18 @@ const loadConfig = async () => {
   }
 }
 
-// Utility function for authenticated API requests
-const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
-  const token = localStorage.getItem('auth_token')
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...options.headers as Record<string, string>
-  }
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  
+// Simple API fetch function - no auth for now
+const simpleFetch = async (url: string, options: RequestInit = {}) => {
   // Prepend API base URL to relative URLs
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL.value}${url}`
   
   const response = await fetch(fullUrl, {
     ...options,
-    headers
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers as Record<string, string>
+    }
   })
-  
-  if (response.status === 401) {
-    console.error('API: Unauthorized - token may be invalid or expired')
-    ElMessage.error('Authentication required. Please log in again.')
-    // Clear invalid token and redirect to login
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('user_data')
-    window.location.href = '/login'
-    throw new Error('Unauthorized')
-  }
   
   return response
 }
@@ -729,7 +712,7 @@ const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
 // Load available profiles
 const loadProfiles = async () => {
   try {
-    const response = await authenticatedFetch('/api/profile/list')
+    const response = await simpleFetch('/api/profile/list')
     
     if (!response.ok) {
       console.error('Profile API not available - server returned:', response.status, response.statusText)
@@ -754,7 +737,7 @@ const loadProfiles = async () => {
     }
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
-      return // Already handled by authenticatedFetch
+      return // Already handled by simpleFetch
     }
     console.error('Failed to load profiles:', error)
     ElMessage.error('Failed to load profiles: Network error or server unavailable')
@@ -896,7 +879,7 @@ const createListener = async () => {
   
   try {
     // Create listener via API - use profile create endpoint
-    const response = await authenticatedFetch('/api/profile/create', {
+    const response = await simpleFetch('/api/profile/create', {
       method: 'POST',
       body: JSON.stringify({
       name: listenerForm.value.name,

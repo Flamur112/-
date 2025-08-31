@@ -290,6 +290,9 @@ func main() {
 	// NUCLEAR CORS BYPASS - KILL ALL CORS BULLSHIT
 	router.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			log.Printf("CORS MIDDLEWARE: Processing request %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			log.Printf("CORS MIDDLEWARE: Origin header: %s", r.Header.Get("Origin"))
+
 			// SET EVERY POSSIBLE CORS HEADER TO BYPASS ALL BROWSER RESTRICTIONS
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "*")
@@ -300,6 +303,7 @@ func main() {
 
 			// KILL OPTIONS REQUESTS IMMEDIATELY
 			if r.Method == "OPTIONS" {
+				log.Printf("CORS MIDDLEWARE: Handling OPTIONS preflight request")
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -309,6 +313,7 @@ func main() {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("X-XSS-Protection", "1; mode=block")
 
+			log.Printf("CORS MIDDLEWARE: Headers set, proceeding to handler")
 			next.ServeHTTP(w, r)
 		})
 	})
@@ -354,6 +359,8 @@ func main() {
 	// THE ACTUAL WORKING PROFILE ENDPOINT
 	api.HandleFunc("/profile/list", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PROFILE LIST CALLED - WORKING!")
+		log.Printf("PROFILE LIST: Request headers: %v", r.Header)
+		log.Printf("PROFILE LIST: Response headers before: %v", w.Header())
 
 		// RETURN WORKING DATA
 		workingData := map[string]interface{}{
@@ -371,6 +378,7 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+		log.Printf("PROFILE LIST: Response headers after: %v", w.Header())
 		json.NewEncoder(w).Encode(workingData)
 	}).Methods("GET", "OPTIONS")
 

@@ -16,12 +16,7 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-        secure: false,
-      }
-    }
+    // No proxy - let frontend make direct requests to backend
+    // Backend has CORS headers, so this should work
   }
 })
