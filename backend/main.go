@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -85,6 +87,12 @@ func getStringFromMap(data map[string]interface{}, key string, defaultValue stri
 		}
 	}
 	return defaultValue
+}
+
+// Check if file exists
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
 }
 
 func getIntFromMap(data map[string]interface{}, key string, defaultValue int) int {
@@ -594,31 +602,31 @@ func main() {
 			connections := vncService.GetActiveConnections()
 			log.Printf("VNC stream: Found %d active connections", len(connections))
 
-					// If no connections, send a placeholder frame to show the frontend is working
-		if len(connections) == 0 {
-			log.Printf("No VNC connections - sending placeholder frame")
-			placeholderFrame := map[string]interface{}{
-				"frame_id":      "placeholder_no_connections",
-				"timestamp":     time.Now().Unix(),
-				"width":         800,
-				"height":        600,
-				"size":          1024,
-				"connection_id": "placeholder",
-				"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+			// If no connections, send a placeholder frame to show the frontend is working
+			if len(connections) == 0 {
+				log.Printf("No VNC connections - sending placeholder frame")
+				placeholderFrame := map[string]interface{}{
+					"frame_id":      "placeholder_no_connections",
+					"timestamp":     time.Now().Unix(),
+					"width":         800,
+					"height":        600,
+					"size":          1024,
+					"connection_id": "placeholder",
+					"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+				}
+				placeholderJSON, _ := json.Marshal(placeholderFrame)
+				fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			} else {
+				// We have VNC connections - log the actual monitor info
+				log.Printf("VNC connections found - will stream real frames")
+				for _, conn := range connections {
+					log.Printf("VNC Connection: %s from %s, Resolution: %s, Frames: %d",
+						conn["id"], conn["agent_ip"], conn["resolution"], conn["frame_count"])
+				}
 			}
-			placeholderJSON, _ := json.Marshal(placeholderFrame)
-			fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-		} else {
-			// We have VNC connections - log the actual monitor info
-			log.Printf("VNC connections found - will stream real frames")
-			for _, conn := range connections {
-				log.Printf("VNC Connection: %s from %s, Resolution: %s, Frames: %d", 
-					conn["id"], conn["agent_ip"], conn["resolution"], conn["frame_count"])
-			}
-		}
 
 			for {
 				select {
@@ -646,7 +654,7 @@ func main() {
 						flusher.Flush()
 					}
 
-					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes, Dimensions: %dx%d)", 
+					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes, Dimensions: %dx%d)",
 						vncFrame.ConnectionID, vncFrame.Size, vncFrame.Width, vncFrame.Height)
 				case <-ticker.C:
 					// Heartbeat to keep connection alive
@@ -666,6 +674,41 @@ func main() {
 		// Keep connection alive
 		<-r.Context().Done()
 		log.Printf("VNC stream connection closed")
+	}).Methods("GET", "OPTIONS")
+
+	// VNC AGENT CONNECTION ENDPOINT - PowerShell agent connects here!
+	api.HandleFunc("/vnc/agent", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC AGENT CONNECTION REQUEST from %s", r.RemoteAddr)
+
+		// Upgrade to WebSocket or handle as raw TCP connection
+		// For now, we'll handle it as a raw connection
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			log.Printf("Failed to hijack connection: %v", err)
+			http.Error(w, "Failed to upgrade connection", http.StatusInternalServerError)
+			return
+		}
+		defer conn.Close()
+
+		// Get VNC service
+		vncService := listenerService.GetVNCService()
+		if vncService == nil {
+			log.Printf("VNC service is nil!")
+			conn.Write([]byte("VNC service not initialized"))
+			return
+		}
+
+		// Handle the VNC agent connection
+		agentIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(agentIP); err == nil {
+			agentIP = host
+		}
+
+		log.Printf("VNC agent connecting from %s", agentIP)
+		vncService.HandleVNCConnection(conn, agentIP)
+
+		// Keep connection alive
+		select {}
 	}).Methods("GET", "OPTIONS")
 
 	// VNC debug endpoint - check if frames are being received
@@ -695,6 +738,33 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(debugInfo)
+	}).Methods("GET", "OPTIONS")
+
+	// VNC AGENT CONNECTION ENDPOINT - This is where PowerShell connects!
+	// NOTE: This is just a status endpoint - actual VNC connections go to VNC service directly
+	api.HandleFunc("/vnc/agent", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC AGENT STATUS REQUEST from %s", r.RemoteAddr)
+
+		// Get VNC service
+		vncService := listenerService.GetVNCService()
+		if vncService == nil {
+			log.Printf("VNC service not initialized")
+			http.Error(w, "VNC service not available", http.StatusInternalServerError)
+			return
+		}
+
+		// Get active VNC connections
+		connections := vncService.GetActiveConnections()
+
+		// Send VNC service status
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":             "vnc_service_active",
+			"active_connections": len(connections),
+			"message":            "VNC service is running - agents should connect directly to VNC service",
+			"vnc_port":           "VNC agents connect directly to VNC service, not HTTP API",
+		})
 	}).Methods("GET", "OPTIONS")
 
 	// VNC monitor switch endpoint
@@ -997,6 +1067,71 @@ func main() {
 		json.NewEncoder(w).Encode(createdProfile)
 	}).Methods("POST", "OPTIONS")
 
+	// START VNC TLS LISTENER ON SEPARATE PORT
+	go func() {
+		vncPort := config.Server.APIPort + 1000 // VNC port is API port + 1000
+
+		log.Printf("Starting VNC TLS listener on port %d", vncPort)
+
+		// Create TLS config for VNC
+		tlsConfig := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			MaxVersion: tls.VersionTLS13,
+		}
+
+		// Load TLS certificates if available
+		if certFile, keyFile := "../server.crt", "../server.key"; fileExists(certFile) && fileExists(keyFile) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err == nil {
+				tlsConfig.Certificates = []tls.Certificate{cert}
+				log.Printf("Loaded VNC TLS certificates from %s and %s", certFile, keyFile)
+			} else {
+				log.Printf("Failed to load VNC TLS certificates: %v", err)
+			}
+		} else {
+			log.Printf("VNC TLS certificates not found, using default config")
+		}
+
+		// Create VNC listener
+		listener, err := tls.Listen("tcp", fmt.Sprintf(":%d", vncPort), tlsConfig)
+		if err != nil {
+			log.Printf("Failed to start VNC TLS listener: %v", err)
+			return
+		}
+		defer listener.Close()
+
+		log.Printf("VNC TLS listener started on port %d", vncPort)
+
+		// Accept VNC connections
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				log.Printf("VNC connection accept error: %v", err)
+				continue
+			}
+
+			// Handle VNC connection in goroutine
+			go func(conn net.Conn) {
+				defer conn.Close()
+
+				agentIP := conn.RemoteAddr().String()
+				if host, _, err := net.SplitHostPort(agentIP); err == nil {
+					agentIP = host
+				}
+
+				log.Printf("VNC agent connected from %s", agentIP)
+
+				// Get VNC service and handle connection
+				vncService := listenerService.GetVNCService()
+				if vncService != nil {
+					vncService.HandleVNCConnection(conn, agentIP)
+				} else {
+					log.Printf("VNC service not available")
+				}
+			}(conn)
+		}
+	}()
+
 	// Start HTTP server
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", config.Server.APIPort),
@@ -1007,6 +1142,7 @@ func main() {
 	log.Printf("Server will be accessible at:")
 	log.Printf("  - http://localhost:%d", config.Server.APIPort)
 	log.Printf("  - http://192.168.0.111:%d", config.Server.APIPort)
+	log.Printf("VNC TLS listener will be on port %d", config.Server.APIPort+1000)
 	log.Printf("Registered routes:")
 	log.Printf("  - / (root)")
 	log.Printf("  - /test-main")
