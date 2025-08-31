@@ -585,6 +585,16 @@ func main() {
 			return
 		}
 
+		// UPDATE THE STORED PROFILE STATUS
+		profilesMutex.Lock()
+		if storedProfile, exists := profilesStorage[profileID]; exists {
+			storedProfile["isActive"] = true
+			storedProfile["startedAt"] = time.Now().Format(time.RFC3339)
+			storedProfile["status"] = "running"
+			profilesStorage[profileID] = storedProfile
+		}
+		profilesMutex.Unlock()
+
 		log.Printf("Successfully started C2 listener on %s:%d", host, port)
 
 		// Return success with profile status
