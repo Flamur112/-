@@ -333,6 +333,14 @@ func main() {
 		})
 	}).Methods("GET", "OPTIONS")
 
+	// SUPER SIMPLE TEST ON MAIN ROUTER
+	router.HandleFunc("/test-main", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("MAIN ROUTER TEST HIT!")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("MAIN ROUTER WORKING"))
+	}).Methods("GET", "OPTIONS")
+
 	// Create API subrouter
 	api := router.PathPrefix("/api").Subrouter()
 
@@ -364,6 +372,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(workingData)
+	}).Methods("GET", "OPTIONS")
+
+	// SUPER SIMPLE TEST ENDPOINT - THIS WILL DEFINITELY WORK
+	api.HandleFunc("/simple-test", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("SIMPLE TEST ENDPOINT HIT!")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("SIMPLE TEST WORKING"))
 	}).Methods("GET", "OPTIONS")
 
 	// SIMPLE PROFILE CREATE ENDPOINT
@@ -466,6 +482,13 @@ func main() {
 	log.Printf("Server will be accessible at:")
 	log.Printf("  - http://localhost:%d", config.Server.APIPort)
 	log.Printf("  - http://192.168.0.111:%d", config.Server.APIPort)
+	log.Printf("Registered routes:")
+	log.Printf("  - / (root)")
+	log.Printf("  - /test-main")
+	log.Printf("  - /api/health")
+	log.Printf("  - /api/simple-test")
+	log.Printf("  - /api/profile/list")
+	log.Printf("  - /api/profile/create")
 
 	go func() {
 		log.Printf("HTTP server starting on :%d...", config.Server.APIPort)
