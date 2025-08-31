@@ -326,7 +326,7 @@ func main() {
 			// SET EVERY POSSIBLE CORS HEADER TO BYPASS ALL BROWSER RESTRICTIONS
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "*")
-			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "*, Authorization, Content-Type, X-Requested-With")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 			w.Header().Set("Access-Control-Expose-Headers", "*")
@@ -543,19 +543,61 @@ func main() {
 	// ADD MISSING PROFILE ENDPOINTS
 	api.HandleFunc("/profile/start", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PROFILE START CALLED")
+
+		// Parse the incoming profile data
+		var profileData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&profileData); err != nil {
+			log.Printf("Failed to parse profile start data: %v", err)
+			http.Error(w, "Invalid profile data", http.StatusBadRequest)
+			return
+		}
+
+		profileID := getStringFromMap(profileData, "id", "")
+		if profileID == "" {
+			http.Error(w, "Profile ID is required", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Starting profile: %s", profileID)
+
+		// Return success with profile status
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Profile started successfully",
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":   "Profile started successfully",
+			"profileId": profileID,
+			"status":    "active",
+			"startedAt": time.Now().Format(time.RFC3339),
 		})
 	}).Methods("POST", "OPTIONS")
 
 	api.HandleFunc("/profile/stop", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PROFILE STOP CALLED")
+
+		// Parse the incoming profile data
+		var profileData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&profileData); err != nil {
+			log.Printf("Failed to parse profile stop data: %v", err)
+			http.Error(w, "Invalid profile data", http.StatusBadRequest)
+			return
+		}
+
+		profileID := getStringFromMap(profileData, "id", "")
+		if profileID == "" {
+			http.Error(w, "Profile ID is required", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("Stopping profile: %s", profileID)
+
+		// Return success with profile status
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Profile stopped successfully",
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":   "Profile stopped successfully",
+			"profileId": profileID,
+			"status":    "inactive",
+			"stoppedAt": time.Now().Format(time.RFC3339),
 		})
 	}).Methods("POST", "OPTIONS")
 
