@@ -575,31 +575,24 @@ func main() {
 
 		log.Printf("VNC stream started - service initialized, waiting for frames...")
 
-		// Start a goroutine to send real VNC frames
+		// Start a goroutine to send REAL VNC frames
 		go func() {
 			ticker := time.NewTicker(100 * time.Millisecond) // 10 FPS for responsiveness
 			defer ticker.Stop()
 
 			frameCount := 0
-			log.Printf("VNC stream goroutine started - waiting for frames from VNC service")
+			log.Printf("VNC stream goroutine started - waiting for REAL VNC frames")
 
-			// Send a test frame immediately to verify frontend is working
-			testFrameData := map[string]interface{}{
-				"frame_id":      "test_frame_initial",
-				"timestamp":     time.Now().Unix(),
-				"width":         200,
-				"height":        150,
-				"size":          1024,
-				"connection_id": "test_connection",
-				"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=", // 1x1 JPEG
+			// Get VNC service reference
+			vncService := listenerService.GetVNCService()
+			if vncService == nil {
+				log.Printf("ERROR: VNC service is nil!")
+				return
 			}
 
-			testFrameJSON, _ := json.Marshal(testFrameData)
-			fmt.Fprintf(w, "data: %s\n\n", testFrameJSON)
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-			log.Printf("Sent TEST frame to verify frontend is working")
+			// Check if we have active VNC connections
+			connections := vncService.GetActiveConnections()
+			log.Printf("VNC stream: Found %d active connections", len(connections))
 
 			for {
 				select {
@@ -628,10 +621,10 @@ func main() {
 
 					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes)", vncFrame.ConnectionID, vncFrame.Size)
 				case <-ticker.C:
-					// Heartbeat to keep connection alive when no frames
+					// Heartbeat to keep connection alive
 					frameCount++
 					if frameCount%50 == 0 { // Log every 5 seconds
-						log.Printf("VNC stream heartbeat - waiting for frames (count: %d)", frameCount)
+						log.Printf("VNC stream heartbeat - waiting for real VNC frames (count: %d)", frameCount)
 					}
 					continue
 
@@ -707,6 +700,72 @@ func main() {
 			"status":  "success",
 		})
 	}).Methods("POST", "OPTIONS")
+
+	// VNC monitors list endpoint - DETECT ACTUAL MONITORS
+	api.HandleFunc("/vnc/monitors", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC monitors request: %s %s", r.Method, r.URL.Path)
+
+		// Detect actual monitors from VNC service
+		vncService := listenerService.GetVNCService()
+		if vncService == nil {
+			log.Printf("ERROR: VNC service is nil!")
+			http.Error(w, "VNC service not initialized", http.StatusInternalServerError)
+			return
+		}
+
+		// Get active VNC connections to see what monitors are available
+		connections := vncService.GetActiveConnections()
+
+		// Create monitor list based on available connections
+		var monitors []map[string]interface{}
+
+		if len(connections) > 0 {
+			// If we have VNC connections, create monitor entries
+			for i, conn := range connections {
+				monitorInfo := map[string]interface{}{
+					"id":          fmt.Sprintf("monitor_%d", i),
+					"name":        fmt.Sprintf("Monitor %d", i+1),
+					"resolution":  getStringFromMap(conn, "resolution", "Unknown"),
+					"agent_ip":    getStringFromMap(conn, "agent_ip", "Unknown"),
+					"is_primary":  i == 0,
+					"is_active":   getBoolFromMap(conn, "is_active", false),
+					"frame_count": getIntFromMap(conn, "frame_count", 0),
+				}
+				monitors = append(monitors, monitorInfo)
+			}
+		} else {
+			// If no VNC connections, create default monitor options
+			monitors = []map[string]interface{}{
+				{
+					"id":          "monitor_primary",
+					"name":        "Primary Monitor",
+					"resolution":  "1920x1080",
+					"agent_ip":    "No VNC Agent",
+					"is_primary":  true,
+					"is_active":   false,
+					"frame_count": 0,
+				},
+				{
+					"id":          "monitor_secondary",
+					"name":        "Secondary Monitor",
+					"resolution":  "1920x1080",
+					"agent_ip":    "No VNC Agent",
+					"is_primary":  false,
+					"is_active":   false,
+					"frame_count": 0,
+				},
+			}
+		}
+
+		log.Printf("VNC monitors detected: %d monitors", len(monitors))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"monitors": monitors,
+			"count":    len(monitors),
+		})
+	}).Methods("GET", "OPTIONS")
 
 	// Register additional handler routes (for authenticated endpoints)
 	// authHandler.RegisterRoutes(api)  // COMMENTED OUT - CONFLICTING

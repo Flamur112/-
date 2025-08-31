@@ -403,9 +403,24 @@
                 <el-form :model="vncSettings" label-width="120px" size="small">
                   <el-form-item label="Monitor:">
                     <el-select v-model="vncSettings.selectedMonitor" placeholder="Select monitor" @change="switchMonitor">
-                      <el-option label="Primary Monitor" value="primary" />
-                      <el-option label="Secondary Monitor" value="secondary" />
-                      <el-option label="All Monitors" value="all" />
+                      <el-option
+                        v-for="monitor in availableMonitors"
+                        :key="monitor.id"
+                        :label="`${monitor.name} (${monitor.resolution})`"
+                        :value="monitor.id"
+                      />
+                    </el-select>
+                    <el-button size="small" @click="refreshMonitors" style="margin-left: 10px;">
+                      <el-icon><Refresh /></el-icon>
+                      Refresh
+                    </el-button>
+                  </el-form-item>
+                  <el-form-item label="Display Mode:">
+                    <el-select v-model="vncSettings.displayMode" placeholder="Select display mode" @change="changeDisplayMode">
+                      <el-option label="Stretch to Fit" value="stretch" />
+                      <el-option label="Maintain Aspect Ratio" value="aspect" />
+                      <el-option label="Center (No Scaling)" value="center" />
+                      <el-option label="Fill Canvas" value="fill" />
                     </el-select>
                   </el-form-item>
                   <el-form-item label="Quality:">
@@ -663,12 +678,16 @@ const vncSettings = ref({
   quality: 5,
   fpsLimit: 5,
   selectedMonitor: 'primary',
-  canvasSize: 'medium'
+  canvasSize: 'medium',
+  displayMode: 'stretch'
 })
 
 // Canvas dimensions
 const canvasWidth = ref(800)
 const canvasHeight = ref(600)
+
+// Available monitors
+const availableMonitors = ref<any[]>([])
 
 
 
@@ -1388,6 +1407,9 @@ const startVncViewer = async () => {
     vncViewerActive.value = true
     ElMessage.success('VNC viewer started')
     
+    // Load available monitors first
+    await refreshMonitors()
+    
     // Connect to real VNC stream from C2 server
     await connectToVNCStream()
     
@@ -1480,21 +1502,60 @@ const processVNCFrame = (frame: any) => {
             // Clear canvas and draw new frame
             ctx.clearRect(0, 0, canvas.width, canvas.height)
             
-            // Calculate scaling to fit canvas while maintaining aspect ratio
-            const scaleX = canvas.width / img.width
-            const scaleY = canvas.height / img.height
-            const scale = Math.min(scaleX, scaleY)
+            // Apply display mode scaling
+            let x, y, drawWidth, drawHeight
             
-            // Calculate centered position
-            const scaledWidth = img.width * scale
-            const scaledHeight = img.height * scale
-            const x = (canvas.width - scaledWidth) / 2
-            const y = (canvas.height - scaledHeight) / 2
+            switch (vncSettings.value.displayMode) {
+              case 'stretch':
+                // Stretch to fill entire canvas
+                x = 0
+                y = 0
+                drawWidth = canvas.width
+                drawHeight = canvas.height
+                break
+                
+              case 'aspect':
+                // Maintain aspect ratio, center on canvas
+                const scaleX = canvas.width / img.width
+                const scaleY = canvas.height / img.height
+                const scale = Math.min(scaleX, scaleY)
+                drawWidth = img.width * scale
+                drawHeight = img.height * scale
+                x = (canvas.width - drawWidth) / 2
+                y = (canvas.height - drawHeight) / 2
+                break
+                
+              case 'center':
+                // No scaling, center on canvas
+                x = (canvas.width - img.width) / 2
+                y = (canvas.height - img.height) / 2
+                drawWidth = img.width
+                drawHeight = img.height
+                break
+                
+              case 'fill':
+                // Fill canvas, crop if necessary
+                const fillScaleX = canvas.width / img.width
+                const fillScaleY = canvas.height / img.height
+                const fillScale = Math.max(fillScaleX, fillScaleY)
+                drawWidth = img.width * fillScale
+                drawHeight = img.height * fillScale
+                x = (canvas.width - drawWidth) / 2
+                y = (canvas.height - drawHeight) / 2
+                break
+                
+              default:
+                // Default to stretch
+                x = 0
+                y = 0
+                drawWidth = canvas.width
+                drawHeight = canvas.height
+            }
             
-            // Draw scaled image centered on canvas
-            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+            // Draw the image with calculated dimensions
+            ctx.drawImage(img, x, y, drawWidth, drawHeight)
             
-            console.log(`Rendered VNC frame: ${img.width}x${img.height} -> ${canvas.width}x${canvas.height} (scale: ${scale.toFixed(2)})`)
+            console.log(`Rendered VNC frame: ${img.width}x${img.height} -> ${canvas.width}x${canvas.height} (mode: ${vncSettings.value.displayMode})`)
           }
           
           // Handle both base64 with and without data URL prefix
@@ -1578,6 +1639,24 @@ const switchMonitor = async (monitor: string) => {
   }
 }
 
+// Refresh available monitors
+const refreshMonitors = async () => {
+  try {
+    const response = await simpleFetch('/api/vnc/monitors')
+    if (response.ok) {
+      const data = await response.json()
+      availableMonitors.value = data.monitors || []
+      ElMessage.success(`Found ${availableMonitors.value.length} monitors`)
+      console.log('Available monitors:', availableMonitors.value)
+    } else {
+      ElMessage.error('Failed to load monitors')
+    }
+  } catch (error) {
+    console.error('Monitor refresh error:', error)
+    ElMessage.error('Failed to load monitors')
+  }
+}
+
 // Resize canvas based on selection
 const resizeCanvas = (size: string) => {
   switch (size) {
@@ -1610,6 +1689,23 @@ const resizeCanvas = (size: string) => {
   }
   
   ElMessage.success(`Canvas resized to ${canvasWidth.value}x${canvasHeight.value}`)
+}
+
+// Change display mode for VNC rendering
+const changeDisplayMode = (mode: string) => {
+  vncSettings.value.displayMode = mode
+  ElMessage.success(`Display mode changed to: ${mode}`)
+  
+  // Force canvas redraw with new mode
+  if (vncCanvas.value && vncViewerActive.value) {
+    const canvas = vncCanvas.value
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      // Clear and redraw with new mode
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      console.log(`Canvas cleared and ready for new display mode: ${mode}`)
+    }
+  }
 }
 
 const clearVncForm = () => {
