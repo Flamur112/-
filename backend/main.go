@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -566,24 +567,25 @@ func main() {
 
 		// No need for frame channel in this implementation
 
-		// Start a goroutine to simulate VNC frames
+		// Start a goroutine to send real VNC frames
 		go func() {
 			ticker := time.NewTicker(200 * time.Millisecond) // 5 FPS
 			defer ticker.Stop()
 
-			frameCount := 0
 			for {
 				select {
-				case <-ticker.C:
-					frameCount++
+				case vncFrame := <-listenerService.GetVNCService().GetFrameChannel():
+					// Send ACTUAL VNC frame data from the VNC service
+					base64Data := base64.StdEncoding.EncodeToString(vncFrame.Data)
 
-					// Create a mock VNC frame (small test image)
 					frameData := map[string]interface{}{
-						"frame_id":      frameCount,
-						"timestamp":     time.Now().Unix(),
-						"size":          1024,
-						"connection_id": "vnc_192.168.0.101:51305_1756646203",
-						"image_data":    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", // 1x1 transparent pixel
+						"frame_id":      vncFrame.ConnectionID + "_" + fmt.Sprintf("%d", time.Now().Unix()),
+						"timestamp":     vncFrame.Timestamp.Unix(),
+						"width":         vncFrame.Width,
+						"height":        vncFrame.Height,
+						"size":          vncFrame.Size,
+						"connection_id": vncFrame.ConnectionID,
+						"image_data":    "data:image/jpeg;base64," + base64Data, // REAL VNC capture data
 					}
 
 					// Send frame as Server-Sent Event
@@ -595,7 +597,10 @@ func main() {
 						flusher.Flush()
 					}
 
-					log.Printf("Sent VNC frame %d to frontend", frameCount)
+					log.Printf("Sent REAL VNC frame from %s to frontend (Size: %d bytes)", vncFrame.ConnectionID, vncFrame.Size)
+				case <-ticker.C:
+					// Heartbeat to keep connection alive when no frames
+					continue
 
 				case <-r.Context().Done():
 					log.Printf("VNC stream client disconnected")
