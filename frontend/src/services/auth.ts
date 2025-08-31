@@ -72,7 +72,7 @@ class AuthService {
         throw new Error('Backend server is not available. Please restart the server using run-mulic2.bat')
       }
 
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch('http://localhost:8080/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,7 +102,7 @@ class AuthService {
         throw new Error('Backend server is not available. Please restart the server using run-mulic2.bat')
       }
 
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch('http://localhost:8080/api/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -128,7 +128,7 @@ class AuthService {
   public async logout(): Promise<void> {
     try {
       if (this.token.value && this.backendAvailable.value) {
-        await fetch('/api/auth/logout', {
+        await fetch('http://localhost:8080/api/auth/logout', {
           method: 'POST',
           headers: {
             ...this.getAuthHeader(),
@@ -156,7 +156,7 @@ class AuthService {
     // Try to load profile with retry logic
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const response = await fetch('/api/auth/profile', {
+        const response = await fetch('http://localhost:8080/api/auth/profile', {
           headers: this.getAuthHeader(),
           // Add timeout to prevent hanging requests
           signal: AbortSignal.timeout(3000) // 3 second timeout
@@ -213,7 +213,7 @@ class AuthService {
         return false
       }
 
-      const response = await fetch('/api/auth/refresh', {
+              const response = await fetch('http://localhost:8080/api/auth/refresh', {
         method: 'POST',
         headers: this.getAuthHeader(),
       })

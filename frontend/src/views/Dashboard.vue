@@ -915,7 +915,7 @@ const createListener = async () => {
 const startListener = async (listener: any) => {
   try {
     // Start listener via API - use profile start endpoint
-    const response = await authenticatedFetch(`/api/profile/start`, {
+    const response = await simpleFetch(`/api/profile/start`, {
       method: 'POST',
       body: JSON.stringify({
         id: listener.id,
@@ -960,7 +960,7 @@ const stopListener = async (listener: any) => {
     )
     
     // Stop listener via API - use profile stop endpoint
-    const response = await authenticatedFetch(`/api/profile/stop`, {
+    const response = await simpleFetch(`/api/profile/stop`, {
       method: 'POST',
       body: JSON.stringify({
         id: listener.id
@@ -998,7 +998,7 @@ const deleteListener = async (listener: any) => {
     )
     
     // Delete listener via API - use profile delete endpoint
-    const response = await authenticatedFetch(`/api/profile/delete/${listener.id}`, {
+    const response = await simpleFetch(`/api/profile/delete/${listener.id}`, {
       method: 'DELETE'
     })
     
@@ -1378,7 +1378,7 @@ const connectToVNCStream = async () => {
   try {
 
     // First check for active VNC connections
-    const response = await authenticatedFetch('/api/vnc/connections')
+    const response = await simpleFetch('/api/vnc/connections')
         if (!response.ok) {
       throw new Error(`Failed to get VNC connections: ${response.status}`)
     }
@@ -1618,7 +1618,7 @@ const updateStats = () => {
 const loadDashboardData = async () => {
   try {
     // Load listeners from API - use the correct endpoint
-    const listenersData = await authenticatedFetch('/api/profile/list')
+    const listenersData = await simpleFetch('/api/profile/list')
     if (listenersData.ok) {
       const data = await listenersData.json()
       // Transform profile data to listener format for compatibility
@@ -1647,7 +1647,7 @@ const loadDashboardData = async () => {
     
     // Load agents from API
     try {
-      const agentsData = await authenticatedFetch('/api/agents')
+      const agentsData = await simpleFetch('/api/agents')
       if (agentsData.ok) {
         const agentsResult = await agentsData.json()
         agents.value = agentsResult.agents || []
@@ -1658,7 +1658,7 @@ const loadDashboardData = async () => {
     
     // Load tasks from API
     try {
-      const tasksData = await authenticatedFetch('/api/tasks')
+      const tasksData = await simpleFetch('/api/tasks')
       if (tasksData.ok) {
         const tasksResult = await tasksData.json()
         tasks.value = tasksResult.tasks || []
