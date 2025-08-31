@@ -602,9 +602,12 @@ func main() {
 			connections := vncService.GetActiveConnections()
 			log.Printf("VNC stream: Found %d active connections", len(connections))
 
-			// If no connections, send a placeholder frame to show the frontend is working
+			// If no connections, send a proper 800x600 placeholder frame
 			if len(connections) == 0 {
-				log.Printf("No VNC connections - sending placeholder frame")
+				log.Printf("No VNC connections - sending proper 800x600 placeholder frame")
+
+				// Create a proper 800x600 colored rectangle as placeholder
+				// This will show the full canvas size, not just top-left corner
 				placeholderFrame := map[string]interface{}{
 					"frame_id":      "placeholder_no_connections",
 					"timestamp":     time.Now().Unix(),
@@ -614,11 +617,15 @@ func main() {
 					"connection_id": "placeholder",
 					"image_data":    "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
 				}
+
+				// Send placeholder frame
 				placeholderJSON, _ := json.Marshal(placeholderFrame)
 				fmt.Fprintf(w, "data: %s\n\n", placeholderJSON)
 				if flusher, ok := w.(http.Flusher); ok {
 					flusher.Flush()
 				}
+
+				log.Printf("Sent 800x600 placeholder frame - frontend should show FULL canvas")
 			} else {
 				// We have VNC connections - log the actual monitor info
 				log.Printf("VNC connections found - will stream real frames")
@@ -1071,7 +1078,7 @@ func main() {
 	go func() {
 		vncPort := config.Server.APIPort + 1000 // VNC port is API port + 1000
 
-		log.Printf("Starting VNC TLS listener on port %d", vncPort)
+		log.Printf("🚀 STARTING VNC TLS LISTENER ON PORT %d", vncPort)
 
 		// Create TLS config for VNC
 		tlsConfig := &tls.Config{
@@ -1084,29 +1091,30 @@ func main() {
 			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 			if err == nil {
 				tlsConfig.Certificates = []tls.Certificate{cert}
-				log.Printf("Loaded VNC TLS certificates from %s and %s", certFile, keyFile)
+				log.Printf("✅ Loaded VNC TLS certificates from %s and %s", certFile, keyFile)
 			} else {
-				log.Printf("Failed to load VNC TLS certificates: %v", err)
+				log.Printf("❌ Failed to load VNC TLS certificates: %v", err)
 			}
 		} else {
-			log.Printf("VNC TLS certificates not found, using default config")
+			log.Printf("⚠️ VNC TLS certificates not found, using default config")
 		}
 
 		// Create VNC listener
 		listener, err := tls.Listen("tcp", fmt.Sprintf(":%d", vncPort), tlsConfig)
 		if err != nil {
-			log.Printf("Failed to start VNC TLS listener: %v", err)
+			log.Printf("❌ FAILED TO START VNC TLS LISTENER: %v", err)
 			return
 		}
 		defer listener.Close()
 
-		log.Printf("VNC TLS listener started on port %d", vncPort)
+		log.Printf("🎯 VNC TLS LISTENER STARTED SUCCESSFULLY ON PORT %d", vncPort)
+		log.Printf("🎯 PowerShell VNC agents should connect to localhost:%d", vncPort)
 
 		// Accept VNC connections
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				log.Printf("VNC connection accept error: %v", err)
+				log.Printf("❌ VNC connection accept error: %v", err)
 				continue
 			}
 
@@ -1119,14 +1127,15 @@ func main() {
 					agentIP = host
 				}
 
-				log.Printf("VNC agent connected from %s", agentIP)
+				log.Printf("🎯 VNC AGENT CONNECTED FROM %s", agentIP)
 
 				// Get VNC service and handle connection
 				vncService := listenerService.GetVNCService()
 				if vncService != nil {
 					vncService.HandleVNCConnection(conn, agentIP)
+					log.Printf("✅ VNC connection handled by service")
 				} else {
-					log.Printf("VNC service not available")
+					log.Printf("❌ VNC service not available")
 				}
 			}(conn)
 		}

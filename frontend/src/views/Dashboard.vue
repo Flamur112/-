@@ -682,9 +682,17 @@ const vncSettings = ref({
   displayMode: 'stretch'
 })
 
-// Canvas dimensions
+// Canvas dimensions - FORCE 800x600 for VNC frames
 const canvasWidth = ref(800)
 const canvasHeight = ref(600)
+
+// Log canvas dimensions on mount
+onMounted(() => {
+  console.log(`Canvas mounted with dimensions: ${canvasWidth.value}x${canvasHeight.value}`)
+  if (vncCanvas.value) {
+    console.log(`Actual canvas element size: ${vncCanvas.value.width}x${vncCanvas.value.height}`)
+  }
+})
 
 // Available monitors
 const availableMonitors = ref<any[]>([])
@@ -1502,60 +1510,30 @@ const processVNCFrame = (frame: any) => {
             // Clear canvas and draw new frame
             ctx.clearRect(0, 0, canvas.width, canvas.height)
             
-            // Apply display mode scaling
-            let x, y, drawWidth, drawHeight
+            // CRITICAL: Force the image to fill the ENTIRE canvas regardless of mode
+            // The VNC frames are 800x600, canvas is 800x600, so STRETCH TO FILL
+            let x = 0
+            let y = 0
+            let drawWidth = canvas.width
+            let drawHeight = canvas.height
             
-            switch (vncSettings.value.displayMode) {
-              case 'stretch':
-                // Stretch to fill entire canvas
-                x = 0
-                y = 0
-                drawWidth = canvas.width
-                drawHeight = canvas.height
-                break
-                
-              case 'aspect':
-                // Maintain aspect ratio, center on canvas
-                const scaleX = canvas.width / img.width
-                const scaleY = canvas.height / img.height
-                const scale = Math.min(scaleX, scaleY)
-                drawWidth = img.width * scale
-                drawHeight = img.height * scale
-                x = (canvas.width - drawWidth) / 2
-                y = (canvas.height - drawHeight) / 2
-                break
-                
-              case 'center':
-                // No scaling, center on canvas
-                x = (canvas.width - img.width) / 2
-                y = (canvas.height - img.height) / 2
-                drawWidth = img.width
-                drawHeight = img.height
-                break
-                
-              case 'fill':
-                // Fill canvas, crop if necessary
-                const fillScaleX = canvas.width / img.width
-                const fillScaleY = canvas.height / img.height
-                const fillScale = Math.max(fillScaleX, fillScaleY)
-                drawWidth = img.width * fillScale
-                drawHeight = img.height * fillScale
-                x = (canvas.width - drawWidth) / 2
-                y = (canvas.height - drawHeight) / 2
-                break
-                
-              default:
-                // Default to stretch
-                x = 0
-                y = 0
-                drawWidth = canvas.width
-                drawHeight = canvas.height
-            }
+            // Log the actual dimensions for debugging
+            console.log(`VNC Frame: ${img.width}x${img.height}, Canvas: ${canvas.width}x${canvas.height}`)
+            console.log(`Drawing at: (${x}, ${y}) with size ${drawWidth}x${drawHeight}`)
+            
+            // FORCE STRETCH MODE - IGNORE USER SETTING UNTIL THIS WORKS
+            // This will make ANY size image fill the entire 800x600 canvas
+            // Even if the image is 1x1, it will stretch to 800x600
             
             // Draw the image with calculated dimensions
             ctx.drawImage(img, x, y, drawWidth, drawHeight)
             
-            console.log(`Rendered VNC frame: ${img.width}x${img.height} -> ${canvas.width}x${canvas.height} (mode: ${vncSettings.value.displayMode})`)
+            console.log(`Rendered VNC frame: ${img.width}x${img.height} -> ${canvas.width}x${canvas.height}`)
+            console.log(`Canvas dimensions: ${canvas.width}x${canvas.height}`)
+            console.log(`Image dimensions: ${img.width}x${img.height}`)
+            console.log(`Draw position: (${x}, ${y})`)
+            console.log(`Draw size: ${drawWidth}x${drawHeight}`)
+            console.log(`Canvas should now show FULL SCREEN VNC!`)
           }
           
           // Handle both base64 with and without data URL prefix
