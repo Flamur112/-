@@ -558,7 +558,34 @@ func main() {
 			return
 		}
 
-		log.Printf("Starting profile: %s", profileID)
+		// ACTUALLY START A REAL C2 LISTENER
+		host := getStringFromMap(profileData, "host", "0.0.0.0")
+		port := getIntFromMap(profileData, "port", 23456)
+		useTLS := getBoolFromMap(profileData, "useTLS", true)
+
+		log.Printf("Starting REAL C2 listener on %s:%d (TLS: %v)", host, port, useTLS)
+
+		// Create a Profile struct for the listener service
+		profile := &services.Profile{
+			ID:          profileID,
+			Name:        getStringFromMap(profileData, "name", "Default Profile"),
+			ProjectName: getStringFromMap(profileData, "projectName", "Default Project"),
+			Host:        host,
+			Port:        port,
+			Description: getStringFromMap(profileData, "description", "Default C2 profile"),
+			UseTLS:      useTLS,
+			CertFile:    getStringFromMap(profileData, "certFile", "../server.crt"),
+			KeyFile:     getStringFromMap(profileData, "keyFile", "../server.key"),
+		}
+
+		// Start the actual listener service
+		if err := listenerService.StartListener(profile); err != nil {
+			log.Printf("Failed to start listener: %v", err)
+			http.Error(w, fmt.Sprintf("Failed to start listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Successfully started C2 listener on %s:%d", host, port)
 
 		// Return success with profile status
 		w.Header().Set("Content-Type", "application/json")
@@ -568,6 +595,12 @@ func main() {
 			"profileId": profileID,
 			"status":    "active",
 			"startedAt": time.Now().Format(time.RFC3339),
+			"listener": map[string]interface{}{
+				"host":   host,
+				"port":   port,
+				"useTLS": useTLS,
+				"status": "running",
+			},
 		})
 	}).Methods("POST", "OPTIONS")
 
