@@ -942,8 +942,11 @@ const startListener = async (listener: any) => {
     }
     ElMessage.success(`Started listener: ${listener.name}`)
     
-    // Refresh dashboard data to update the VNC dropdown
-    await loadDashboardData()
+    // Don't refresh dashboard data - it overwrites our local state!
+    // Just update the VNC dropdown manually
+    if (listener.useTLS) {
+      vncForm.value.c2Port = String(listener.port)
+    }
   } catch (error) {
     console.error('Failed to start listener:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
