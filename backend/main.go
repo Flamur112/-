@@ -277,7 +277,7 @@ func main() {
 	// Initialize services
 	listenerService := services.NewListenerService()
 	defer listenerService.Close()
-	profileStorage := services.NewProfileStorage(db)
+	// profileStorage := services.NewProfileStorage(db)  // COMMENTED OUT - NOT USED
 
 	// Initialize handlers - COMMENTED OUT TO AVOID CONFLICTS
 	// authHandler := handlers.NewAuthHandler(db)
