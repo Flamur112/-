@@ -396,18 +396,40 @@ func main() {
 		log.Printf("PROFILE LIST: Request headers: %v", r.Header)
 		log.Printf("PROFILE LIST: Response headers before: %v", w.Header())
 
-		// RETURN WORKING DATA
+		// GET ACTUAL STORED PROFILES
+		profilesMutex.RLock()
+		profiles := make([]map[string]interface{}, 0, len(profilesStorage))
+		for _, profile := range profilesStorage {
+			profiles = append(profiles, profile)
+		}
+		profilesMutex.RUnlock()
+
+		// If no profiles exist, create a default one
+		if len(profiles) == 0 {
+			defaultProfile := map[string]interface{}{
+				"id":          "default_profile",
+				"name":        "Default C2 Profile",
+				"projectName": "Default Project",
+				"host":        "0.0.0.0",
+				"port":        4444,
+				"description": "Default C2 profile for testing",
+				"useTLS":      true,
+				"certFile":    "../server.crt",
+				"keyFile":     "../server.key",
+				"isActive":    false,
+				"createdAt":   time.Now().Format(time.RFC3339),
+				"connections": 0,
+			}
+			profiles = append(profiles, defaultProfile)
+
+			// Store the default profile
+			profilesMutex.Lock()
+			profilesStorage["default_profile"] = defaultProfile
+			profilesMutex.Unlock()
+		}
+
 		workingData := map[string]interface{}{
-			"profiles": []map[string]interface{}{
-				{
-					"id":       "working_1",
-					"name":     "Working Profile",
-					"host":     "0.0.0.0",
-					"port":     23456,
-					"useTLS":   true,
-					"isActive": true,
-				},
-			},
+			"profiles": profiles,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -684,9 +706,16 @@ func main() {
 			"certFile":    getStringFromMap(profileData, "certFile", ""),
 			"keyFile":     getStringFromMap(profileData, "keyFile", ""),
 			"isActive":    false,
+			"createdAt":   time.Now().Format(time.RFC3339),
+			"connections": 0,
 		}
 
-		log.Printf("Profile created with ID: %s", profileID)
+		// ACTUALLY STORE THE PROFILE
+		profilesMutex.Lock()
+		profilesStorage[profileID] = createdProfile
+		profilesMutex.Unlock()
+
+		log.Printf("Profile created and STORED with ID: %s", profileID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(createdProfile)
