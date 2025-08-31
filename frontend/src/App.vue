@@ -46,7 +46,7 @@ const createDefaultProfile = async () => {
     }
     
     // Save profile to backend
-    const response = await fetch('/api/profile/create', {
+    const response = await fetch('http://localhost:8080/api/profile/create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

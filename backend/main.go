@@ -72,6 +72,37 @@ type VNCConnection struct {
 	ConnectedAt  time.Time `json:"connected_at"`
 }
 
+// Helper functions for safely extracting values from map[string]interface{}
+func getStringFromMap(data map[string]interface{}, key string, defaultValue string) string {
+	if val, ok := data[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return defaultValue
+}
+
+func getIntFromMap(data map[string]interface{}, key string, defaultValue int) int {
+	if val, ok := data[key]; ok {
+		if num, ok := val.(float64); ok {
+			return int(num)
+		}
+		if num, ok := val.(int); ok {
+			return num
+		}
+	}
+	return defaultValue
+}
+
+func getBoolFromMap(data map[string]interface{}, key string, defaultValue bool) bool {
+	if val, ok := data[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return defaultValue
+}
+
 // Thread-safe VNC connection management
 func addVNCConnection(id string, conn *VNCConnection) {
 	vncMutex.Lock()
@@ -530,11 +561,36 @@ func main() {
 
 	api.HandleFunc("/profile/create", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PROFILE CREATE CALLED")
+
+		// Parse the incoming profile data
+		var profileData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&profileData); err != nil {
+			log.Printf("Failed to parse profile data: %v", err)
+			http.Error(w, "Invalid profile data", http.StatusBadRequest)
+			return
+		}
+
+		// Generate a unique ID for the profile
+		profileID := fmt.Sprintf("profile_%d", time.Now().Unix())
+
+		// Create the profile response with the actual data - PROPER GO SYNTAX
+		createdProfile := map[string]interface{}{
+			"id":          profileID,
+			"name":        getStringFromMap(profileData, "name", "Default Profile"),
+			"projectName": getStringFromMap(profileData, "projectName", "Default Project"),
+			"host":        getStringFromMap(profileData, "host", "0.0.0.0"),
+			"port":        getIntFromMap(profileData, "port", 23456),
+			"description": getStringFromMap(profileData, "description", "Default C2 profile"),
+			"useTLS":      getBoolFromMap(profileData, "useTLS", true),
+			"certFile":    getStringFromMap(profileData, "certFile", ""),
+			"keyFile":     getStringFromMap(profileData, "keyFile", ""),
+			"isActive":    false,
+		}
+
+		log.Printf("Profile created with ID: %s", profileID)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Profile created successfully",
-		})
+		json.NewEncoder(w).Encode(createdProfile)
 	}).Methods("POST", "OPTIONS")
 
 	// Start HTTP server
