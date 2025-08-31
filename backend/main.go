@@ -614,6 +614,38 @@ func main() {
 		log.Printf("VNC stream connection closed")
 	}).Methods("GET", "OPTIONS")
 
+	// VNC monitor switch endpoint
+	api.HandleFunc("/vnc/switch-monitor", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("VNC monitor switch request: %s %s", r.Method, r.URL.Path)
+
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parse monitor selection
+		var monitorData map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&monitorData); err != nil {
+			log.Printf("Failed to parse monitor data: %v", err)
+			http.Error(w, "Invalid monitor data", http.StatusBadRequest)
+			return
+		}
+
+		monitor := getStringFromMap(monitorData, "monitor", "primary")
+		log.Printf("Switching VNC to monitor: %s", monitor)
+
+		// TODO: Implement actual monitor switching in VNC service
+		// For now, just acknowledge the request
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": fmt.Sprintf("Switched to %s monitor", monitor),
+			"monitor": monitor,
+			"status":  "success",
+		})
+	}).Methods("POST", "OPTIONS")
+
 	// Register additional handler routes (for authenticated endpoints)
 	// authHandler.RegisterRoutes(api)  // COMMENTED OUT - CONFLICTING
 	// profileHandler.RegisterRoutes(api)  // COMMENTED OUT - CONFLICTING

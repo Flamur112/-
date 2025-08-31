@@ -401,21 +401,37 @@
               
               <div class="vnc-settings">
                 <el-form :model="vncSettings" label-width="120px" size="small">
+                  <el-form-item label="Monitor:">
+                    <el-select v-model="vncSettings.selectedMonitor" placeholder="Select monitor" @change="switchMonitor">
+                      <el-option label="Primary Monitor" value="primary" />
+                      <el-option label="Secondary Monitor" value="secondary" />
+                      <el-option label="All Monitors" value="all" />
+                    </el-select>
+                  </el-form-item>
                   <el-form-item label="Quality:">
                     <el-slider v-model="vncSettings.quality" :min="1" :max="10" :step="1" />
                   </el-form-item>
                   <el-form-item label="FPS Limit:">
                     <el-input-number v-model="vncSettings.fpsLimit" :min="1" :max="30" :step="1" />
                   </el-form-item>
+                  <el-form-item label="Canvas Size:">
+                    <el-select v-model="vncSettings.canvasSize" placeholder="Select canvas size" @change="resizeCanvas">
+                      <el-option label="Native (200x150)" value="native" />
+                      <el-option label="Medium (800x600)" value="medium" />
+                      <el-option label="Large (1200x900)" value="large" />
+                      <el-option label="Full HD (1920x1080)" value="fullhd" />
+                    </el-select>
+                  </el-form-item>
                 </el-form>
         </div>
             </div>
             
             <div v-if="vncViewerActive" class="vnc-display">
-              <canvas ref="vncCanvas" class="vnc-canvas" width="800" height="600"></canvas>
+              <canvas ref="vncCanvas" class="vnc-canvas" :width="canvasWidth" :height="canvasHeight"></canvas>
               <div class="vnc-overlay">
                 <div class="overlay-info">
                   <span>Resolution: {{ vncAgentInfo.resolution || '200x150' }}</span>
+                  <span>Canvas: {{ canvasWidth }}x{{ canvasHeight }}</span>
                   <span>FPS: {{ vncCurrentFps }}</span>
                   <span>Frame: {{ vncFrameCount }}</span>
                 </div>
@@ -645,8 +661,14 @@ const vncAgentInfo = ref({
 })
 const vncSettings = ref({
   quality: 5,
-  fpsLimit: 5
+  fpsLimit: 5,
+  selectedMonitor: 'primary',
+  canvasSize: 'medium'
 })
+
+// Canvas dimensions
+const canvasWidth = ref(800)
+const canvasHeight = ref(600)
 
 
 
@@ -1455,15 +1477,30 @@ const processVNCFrame = (frame: any) => {
         // Create image from base64 data
           const img = new Image()
           img.onload = () => {
-          // Clear canvas and draw new frame
+            // Clear canvas and draw new frame
             ctx.clearRect(0, 0, canvas.width, canvas.height)
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        }
-        
-        // Handle both base64 with and without data URL prefix
-        const imageData = frame.image_data.startsWith('data:') 
-          ? frame.image_data 
-          : `data:image/jpeg;base64,${frame.image_data}`
+            
+            // Calculate scaling to fit canvas while maintaining aspect ratio
+            const scaleX = canvas.width / img.width
+            const scaleY = canvas.height / img.height
+            const scale = Math.min(scaleX, scaleY)
+            
+            // Calculate centered position
+            const scaledWidth = img.width * scale
+            const scaledHeight = img.height * scale
+            const x = (canvas.width - scaledWidth) / 2
+            const y = (canvas.height - scaledHeight) / 2
+            
+            // Draw scaled image centered on canvas
+            ctx.drawImage(img, x, y, scaledWidth, scaledHeight)
+            
+            console.log(`Rendered VNC frame: ${img.width}x${img.height} -> ${canvas.width}x${canvas.height} (scale: ${scale.toFixed(2)})`)
+          }
+          
+          // Handle both base64 with and without data URL prefix
+          const imageData = frame.image_data.startsWith('data:') 
+            ? frame.image_data 
+            : `data:image/jpeg;base64,${frame.image_data}`
           img.src = imageData
       }
     } catch (error) {
@@ -1514,6 +1551,65 @@ const toggleFullscreen = () => {
       vncCanvas.value.requestFullscreen()
     }
   }
+}
+
+// Switch between monitors
+const switchMonitor = async (monitor: string) => {
+  try {
+    console.log(`Switching to monitor: ${monitor}`)
+    // Send monitor switch request to backend
+    const response = await simpleFetch('/api/vnc/switch-monitor', {
+      method: 'POST',
+      body: JSON.stringify({ monitor })
+    })
+    
+    if (response.ok) {
+      ElMessage.success(`Switched to ${monitor} monitor`)
+      // Refresh VNC connection to get new monitor data
+      if (vncViewerActive.value) {
+        await connectToVNCStream()
+      }
+    } else {
+      ElMessage.error('Failed to switch monitor')
+    }
+  } catch (error) {
+    console.error('Monitor switch error:', error)
+    ElMessage.error('Failed to switch monitor')
+  }
+}
+
+// Resize canvas based on selection
+const resizeCanvas = (size: string) => {
+  switch (size) {
+    case 'native':
+      canvasWidth.value = 200
+      canvasHeight.value = 150
+      break
+    case 'medium':
+      canvasWidth.value = 800
+      canvasHeight.value = 600
+      break
+    case 'large':
+      canvasWidth.value = 1200
+      canvasHeight.value = 900
+      break
+    case 'fullhd':
+      canvasWidth.value = 1920
+      canvasHeight.value = 1080
+      break
+    default:
+      canvasWidth.value = 800
+      canvasHeight.value = 600
+  }
+  
+  // Force canvas redraw
+  if (vncCanvas.value) {
+    const canvas = vncCanvas.value
+    canvas.width = canvasWidth.value
+    canvas.height = canvasHeight.value
+  }
+  
+  ElMessage.success(`Canvas resized to ${canvasWidth.value}x${canvasHeight.value}`)
 }
 
 const clearVncForm = () => {
